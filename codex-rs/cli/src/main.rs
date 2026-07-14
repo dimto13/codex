@@ -50,6 +50,7 @@ mod app_cmd;
 mod desktop_app;
 mod doctor;
 mod exec_server_telemetry;
+mod interactive_search;
 mod marketplace_cmd;
 mod mcp_cmd;
 mod plugin_cmd;
@@ -128,6 +129,10 @@ enum Subcommand {
 
     /// Run a code review non-interactively.
     Review(ReviewCommand),
+
+    /// Run a headless interactive session with web search enabled.
+    #[clap(name = "interactive-search")]
+    InteractiveSearch(InteractiveSearchCommand),
 
     /// Manage login.
     Login(LoginCommand),
@@ -216,6 +221,20 @@ struct CompletionCommand {
     /// Shell to generate completions for
     #[clap(value_enum, default_value_t = Shell::Bash)]
     shell: Shell,
+}
+
+#[derive(Debug, Parser)]
+struct InteractiveSearchCommand {
+    /// Print structured output as JSON.
+    #[arg(long = "json", default_value_t = false)]
+    json: bool,
+
+    /// Timeout for the session in seconds.
+    #[arg(long = "timeout", value_name = "SECONDS")]
+    timeout: Option<u64>,
+
+    #[clap(flatten)]
+    interactive: TuiCli,
 }
 
 #[derive(Debug, Parser)]
@@ -1035,6 +1054,26 @@ async fn cli_main(
                 root_config_overrides.clone(),
             );
             codex_exec::run_main(exec_cli, arg0_paths.clone()).await?;
+        }
+        Some(Subcommand::InteractiveSearch(search_cli)) => {
+            reject_remote_mode_for_subcommand(
+                root_remote.as_deref(),
+                root_remote_auth_token_env.as_deref(),
+                "interactive-search",
+            )?;
+            let mut interactive = search_cli.interactive;
+            interactive.strict_config |= root_strict_config;
+            prepend_config_flags(
+                &mut interactive.config_overrides,
+                root_config_overrides.clone(),
+            );
+            interactive_search::run_interactive_search(
+                interactive,
+                search_cli.json,
+                search_cli.timeout,
+                arg0_paths.codex_linux_sandbox_exe.clone(),
+            )
+            .await?;
         }
         Some(Subcommand::McpServer(McpServerCommand { strict_config })) => {
             reject_remote_mode_for_subcommand(
