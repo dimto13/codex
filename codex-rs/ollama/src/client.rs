@@ -126,6 +126,36 @@ impl OllamaClient {
         Ok(names)
     }
 
+    /// Return the capabilities advertised by Ollama for a model.
+    pub async fn fetch_model_capabilities(&self, model: &str) -> io::Result<Vec<String>> {
+        let show_url = format!("{}/api/show", self.host_root.trim_end_matches('/'));
+        let resp = self
+            .client
+            .post(show_url)
+            .json(&serde_json::json!({"model": model}))
+            .send()
+            .await
+            .map_err(io::Error::other)?;
+        if !resp.status().is_success() {
+            return Err(io::Error::other(format!(
+                "failed to query Ollama capabilities for {model}: HTTP {}",
+                resp.status()
+            )));
+        }
+        let val = resp.json::<JsonValue>().await.map_err(io::Error::other)?;
+        Ok(val
+            .get("capabilities")
+            .and_then(JsonValue::as_array)
+            .map(|capabilities| {
+                capabilities
+                    .iter()
+                    .filter_map(JsonValue::as_str)
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default())
+    }
+
     /// Query the server for its version string, returning `None` when unavailable.
     pub async fn fetch_version(&self) -> io::Result<Option<Version>> {
         let version_url = format!("{}/api/version", self.host_root.trim_end_matches('/'));

@@ -1,5 +1,6 @@
 use clap::Args;
 use clap::CommandFactory;
+use clap::FromArgMatches;
 use clap::Parser;
 use clap_complete::Shell;
 use clap_complete::generate;
@@ -38,6 +39,7 @@ use codex_utils_cli::ProfileV2Name;
 use codex_utils_cli::SharedCliOptions;
 use owo_colors::OwoColorize;
 use std::collections::HashSet;
+use std::ffi::OsStr;
 use std::io::IsTerminal;
 use std::io::Write;
 use std::path::PathBuf;
@@ -767,7 +769,11 @@ fn handle_app_exit(exit_info: AppExitInfo) -> anyhow::Result<()> {
         std::process::exit(1);
     }
     if let Some(action) = update_action {
-        run_update_action(action)?;
+        if current_invocation_is_aren() {
+            run_aren_update_command()?;
+        } else {
+            run_update_action(action)?;
+        }
     }
     Ok(())
 }
@@ -816,6 +822,10 @@ fn run_update_action(action: UpdateAction) -> anyhow::Result<()> {
 }
 
 fn run_update_command() -> anyhow::Result<()> {
+    if current_invocation_is_aren() {
+        return run_aren_update_command();
+    }
+
     #[cfg(debug_assertions)]
     {
         anyhow::bail!(
@@ -832,6 +842,18 @@ fn run_update_command() -> anyhow::Result<()> {
         };
         run_update_action(action)
     }
+}
+
+fn run_aren_update_command() -> anyhow::Result<()> {
+    println!("Updating Aren via `aren-update`...");
+    let status = std::process::Command::new("aren-update")
+        .status()
+        .map_err(|error| anyhow::anyhow!("failed to start `aren-update`: {error}"))?;
+    if !status.success() {
+        anyhow::bail!("`aren-update` failed with status {status}");
+    }
+    println!("\nAren was updated successfully. Please restart Aren.");
+    Ok(())
 }
 
 fn run_execpolicycheck(cmd: ExecPolicyCheckCommand) -> anyhow::Result<()> {
@@ -980,6 +1002,33 @@ fn main() -> anyhow::Result<()> {
     })
 }
 
+fn multitool_command_for_invocation(arg0: Option<&OsStr>) -> clap::Command {
+    let command = MultitoolCli::command();
+    if invocation_name_is_aren(arg0) {
+        command
+            .name("aren")
+            .bin_name("aren")
+            .override_usage("aren [OPTIONS] [PROMPT]\n       aren [OPTIONS] <COMMAND> [ARGS]")
+    } else {
+        command
+    }
+}
+
+fn invocation_name_is_aren(arg0: Option<&OsStr>) -> bool {
+    arg0.and_then(|value| std::path::Path::new(value).file_name())
+        .is_some_and(|name| name == "aren")
+}
+
+fn current_invocation_is_aren() -> bool {
+    invocation_name_is_aren(std::env::args_os().next().as_deref())
+}
+
+fn parse_multitool_cli() -> MultitoolCli {
+    let arg0 = std::env::args_os().next();
+    let matches = multitool_command_for_invocation(arg0.as_deref()).get_matches();
+    MultitoolCli::from_arg_matches(&matches).unwrap_or_else(|error| error.exit())
+}
+
 async fn cli_main(
     arg0_paths: Arg0DispatchPaths,
     remote_control_disabled: bool,
@@ -990,7 +1039,7 @@ async fn cli_main(
         remote,
         mut interactive,
         subcommand,
-    } = MultitoolCli::parse();
+    } = parse_multitool_cli();
 
     // Fold --enable/--disable into config overrides so they flow to all subcommands.
     let toggle_overrides = feature_toggles.to_overrides()?;
@@ -1071,7 +1120,7 @@ async fn cli_main(
                 interactive,
                 search_cli.json,
                 search_cli.timeout,
-                arg0_paths.codex_linux_sandbox_exe.clone(),
+                arg0_paths.clone(),
             )
             .await?;
         }
@@ -1697,6 +1746,7 @@ fn profile_v2_for_subcommand<'a>(
     match subcommand {
         Subcommand::Exec(_)
         | Subcommand::Review(_)
+        | Subcommand::InteractiveSearch(_)
         | Subcommand::Resume(_)
         | Subcommand::Archive(_)
         | Subcommand::Delete(_)
@@ -1708,7 +1758,7 @@ fn profile_v2_for_subcommand<'a>(
             subcommand: DebugSubcommand::PromptInput(_),
         }) => Ok(Some(profile_v2)),
         _ => anyhow::bail!(
-            "--profile only applies to runtime commands and `codex mcp`: `codex`, `codex exec`, `codex review`, `codex resume`, `codex archive`, `codex delete`, `codex unarchive`, `codex fork`, `codex mcp`, `codex sandbox`, and `codex debug prompt-input`."
+            "--profile only applies to runtime commands and `codex mcp`: `codex`, `codex exec`, `codex review`, `codex interactive-search`, `codex resume`, `codex archive`, `codex delete`, `codex unarchive`, `codex fork`, `codex mcp`, `codex sandbox`, and `codex debug prompt-input`."
         ),
     }
 }
@@ -2148,6 +2198,7 @@ fn unsupported_subcommand_name_for_strict_config(
         None
         | Some(Subcommand::Exec(_))
         | Some(Subcommand::Review(_))
+        | Some(Subcommand::InteractiveSearch(_))
         | Some(Subcommand::McpServer(_))
         | Some(Subcommand::ExecServer(_))
         | Some(Subcommand::Resume(_))
@@ -2702,6 +2753,18 @@ mod tests {
     #[test]
     fn profile_v2_is_allowed_for_runtime_subcommands() {
         assert_eq!(
+            profile_v2_for_args(&[
+                "codex",
+                "--profile",
+                "work",
+                "interactive-search",
+                "research"
+            ])
+            .expect("interactive-search supports profile-v2")
+            .as_deref(),
+            Some("work")
+        );
+        assert_eq!(
             profile_v2_for_args(&["codex", "--profile", "work", "resume"])
                 .expect("resume supports profile-v2")
                 .as_deref(),
@@ -2733,6 +2796,31 @@ mod tests {
 
         assert!(cli.subcommand.is_none());
         assert_eq!(cli.interactive.prompt.as_deref(), Some("import"));
+    }
+
+    #[test]
+    fn interactive_search_parses_ollama_options() {
+        let cli = MultitoolCli::try_parse_from([
+            "codex",
+            "interactive-search",
+            "--json",
+            "--timeout",
+            "30",
+            "--oss",
+            "--local-provider",
+            "ollama",
+            "research this",
+        ])
+        .expect("parse interactive-search");
+
+        let Some(Subcommand::InteractiveSearch(command)) = cli.subcommand else {
+            panic!("expected interactive-search subcommand");
+        };
+        assert!(command.json);
+        assert_eq!(command.timeout, Some(30));
+        assert!(command.interactive.oss);
+        assert_eq!(command.interactive.oss_provider.as_deref(), Some("ollama"));
+        assert_eq!(command.interactive.prompt.as_deref(), Some("research this"));
     }
 
     #[test]
@@ -2958,6 +3046,20 @@ mod tests {
     fn update_parses_as_update_subcommand() {
         let cli = MultitoolCli::try_parse_from(["codex", "update"]).expect("parse");
         assert!(matches!(cli.subcommand, Some(Subcommand::Update)));
+    }
+
+    #[test]
+    fn aren_invocation_uses_aren_branding() {
+        let command = multitool_command_for_invocation(Some(OsStr::new("/home/user/bin/aren")));
+        assert_eq!(command.get_name(), "aren");
+        assert!(!invocation_name_is_aren(Some(OsStr::new(
+            "/usr/local/bin/codex"
+        ))));
+
+        let Err(error) = command.try_get_matches_from(["aren", "--version"]) else {
+            panic!("--version should short-circuit parsing");
+        };
+        assert!(error.to_string().starts_with("aren "));
     }
 
     #[test]

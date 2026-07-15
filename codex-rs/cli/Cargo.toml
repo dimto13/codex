@@ -32,6 +32,7 @@ codex-cloud-tasks = { path = "../cloud-tasks" }
 codex-utils-cli = { workspace = true }
 codex-config = { workspace = true }
 codex-core = { workspace = true }
+codex-core-api = { workspace = true }
 codex-core-plugins = { workspace = true }
 codex-home = { workspace = true }
 codex-exec = { workspace = true }
@@ -46,6 +47,7 @@ codex-mcp = { workspace = true }
 codex-mcp-server = { workspace = true }
 codex-model-provider = { workspace = true }
 codex-models-manager = { workspace = true }
+codex-ollama = { workspace = true }
 codex-plugin = { workspace = true }
 codex-protocol = { workspace = true }
 codex-responses-api-proxy = { workspace = true }
@@ -58,6 +60,7 @@ codex-stdio-to-uds = { workspace = true }
 codex-terminal-detection = { workspace = true }
 codex-tui = { workspace = true }
 codex-utils-absolute-path = { workspace = true }
+codex-utils-oss = { workspace = true }
 codex-utils-path = { workspace = true }
 crossterm = { workspace = true }
 http = { workspace = true }
@@ -70,7 +73,7 @@ serde_json = { workspace = true }
 supports-color = { workspace = true }
 sys-locale = { workspace = true }
 tempfile = { workspace = true }
-time = { workspace = true }
+time = { workspace = true, features = ["formatting"] }
 tokio = { workspace = true, features = [
     "io-std",
     "macros",

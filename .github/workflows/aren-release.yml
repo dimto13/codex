@@ -1,0 +1,140 @@
+name: aren-release
+
+on:
+  push:
+    branches:
+      - "**"
+    tags:
+      - "aren-v*"
+  workflow_dispatch:
+
+concurrency:
+  group: aren-release-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  AREN_ARCHIVE: aren-linux-x86_64.tar.gz
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+  # The upstream release profile uses Thin-LTO and needs substantially more
+  # memory than a standard GitHub-hosted runner. Aren keeps release
+  # optimization while using a less memory-intensive linker configuration.
+  CARGO_PROFILE_RELEASE_LTO: "false"
+  CARGO_PROFILE_RELEASE_DEBUG: "none"
+  CARGO_PROFILE_RELEASE_STRIP: "symbols"
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+  CARGO_BUILD_JOBS: "2"
+
+jobs:
+  build-linux-x86_64:
+    name: Build Aren for Linux x86_64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: codex-rs
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update -y
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            binutils \
+            libcap-dev \
+            pkg-config
+
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+
+      - name: Configure pinned rusty_v8 artifacts
+        uses: ./.github/actions/setup-rusty-v8
+        with:
+          target: x86_64-unknown-linux-gnu
+
+      - name: Build Aren
+        run: cargo build --locked --release -p codex-cli --bin codex
+
+      - name: Package and smoke-test Aren
+        run: |
+          set -euo pipefail
+          mkdir -p ../dist/package
+          install -m 0755 target/release/codex ../dist/package/aren
+          ../dist/package/aren --version
+          ../dist/package/aren interactive-search --help >/dev/null
+          tar -C ../dist/package -czf "../dist/${AREN_ARCHIVE}" aren
+          (cd ../dist && sha256sum "${AREN_ARCHIVE}" > "${AREN_ARCHIVE}.sha256")
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: aren-linux-x86_64
+          path: |
+            dist/${{ env.AREN_ARCHIVE }}
+            dist/${{ env.AREN_ARCHIVE }}.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+  publish-edge:
+    name: Publish rolling Aren Edge release
+    needs: build-linux-x86_64
+    if: github.event_name == 'push' && github.ref == 'refs/heads/custom/interactive-search'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: aren-linux-x86_64
+          path: dist
+
+      - name: Replace rolling release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release delete aren-edge --repo "${GITHUB_REPOSITORY}" --yes || true
+          gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/aren-edge" || true
+          gh release create aren-edge \
+            --repo "${GITHUB_REPOSITORY}" \
+            --target "${GITHUB_SHA}" \
+            --title "Aren Edge" \
+            --notes "Automatischer Entwicklungsbuild aus ${GITHUB_REF_NAME} (${GITHUB_SHA})." \
+            --prerelease \
+            "dist/${AREN_ARCHIVE}" \
+            "dist/${AREN_ARCHIVE}.sha256"
+
+  publish-tag:
+    name: Publish tagged Aren release
+    needs: build-linux-x86_64
+    if: startsWith(github.ref, 'refs/tags/aren-v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: aren-linux-x86_64
+          path: dist
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --verify-tag \
+            --title "Aren ${GITHUB_REF_NAME#aren-v}" \
+            --generate-notes \
+            "dist/${AREN_ARCHIVE}" \
+            "dist/${AREN_ARCHIVE}.sha256"
