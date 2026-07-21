@@ -1093,6 +1093,7 @@ pub(crate) fn build_prompt(
         tools: router.model_visible_specs(),
         parallel_tool_calls: turn_context.model_info.supports_parallel_tool_calls,
         base_instructions,
+        current_date: turn_context.current_date.clone(),
         output_schema: turn_context.final_output_json_schema.clone(),
         output_schema_strict: !crate::guardian::is_guardian_reviewer_source(
             &turn_context.session_source,

@@ -31,13 +31,29 @@ const MCP_TOOL_NAME_DELIMITER: &str = "__";
 
 pub struct McpHandler {
     tool_info: ToolInfo,
+    tool_name: ToolName,
     spec: ToolSpec,
 }
 
 impl McpHandler {
     pub fn new(tool_info: ToolInfo) -> Result<Self, serde_json::Error> {
+        let tool_name = tool_info.canonical_tool_name();
         let spec = create_tool_spec(&tool_info)?;
-        Ok(Self { tool_info, spec })
+        Ok(Self {
+            tool_info,
+            tool_name,
+            spec,
+        })
+    }
+
+    pub fn new_flattened(tool_info: ToolInfo) -> Result<Self, serde_json::Error> {
+        let tool_name = ToolName::plain(join_tool_name(&tool_info.canonical_tool_name()));
+        let spec = ToolSpec::Function(mcp_tool_to_responses_api_tool(&tool_name, &tool_info.tool)?);
+        Ok(Self {
+            tool_info,
+            tool_name,
+            spec,
+        })
     }
 
     fn hook_tool_name(&self) -> HookToolName {
@@ -66,7 +82,7 @@ fn ensure_mcp_prefix(name: &str) -> String {
 
 impl ToolExecutor<ToolInvocation> for McpHandler {
     fn tool_name(&self) -> ToolName {
-        self.tool_info.canonical_tool_name()
+        self.tool_name.clone()
     }
 
     fn spec(&self) -> ToolSpec {

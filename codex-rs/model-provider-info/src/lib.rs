@@ -151,6 +151,13 @@ pub struct ModelProviderAwsAuthInfo {
 }
 
 impl ModelProviderInfo {
+    pub fn is_oss(&self) -> bool {
+        matches!(
+            self.name.as_str(),
+            OSS_PROVIDER_NAME | OLLAMA_PROVIDER_NAME | LMSTUDIO_PROVIDER_NAME
+        )
+    }
+
     pub fn validate(&self) -> std::result::Result<(), String> {
         if self.aws.is_some() {
             if self.supports_websockets {
@@ -422,6 +429,9 @@ impl ModelProviderInfo {
 
 pub const DEFAULT_LMSTUDIO_PORT: u16 = 1234;
 pub const DEFAULT_OLLAMA_PORT: u16 = 11434;
+const OSS_PROVIDER_NAME: &str = "gpt-oss";
+const OLLAMA_PROVIDER_NAME: &str = "Ollama";
+const LMSTUDIO_PROVIDER_NAME: &str = "LM Studio";
 
 pub const LMSTUDIO_OSS_PROVIDER_ID: &str = "lmstudio";
 pub const OLLAMA_OSS_PROVIDER_ID: &str = "ollama";
@@ -509,12 +519,19 @@ pub fn create_oss_provider(default_provider_port: u16, wire_api: WireApi) -> Mod
         .ok()
         .filter(|v| !v.trim().is_empty())
         .unwrap_or(default_codex_oss_base_url);
-    create_oss_provider_with_base_url(&codex_oss_base_url, wire_api)
+    let mut provider = create_oss_provider_with_base_url(&codex_oss_base_url, wire_api);
+    provider.name = match default_provider_port {
+        DEFAULT_OLLAMA_PORT => OLLAMA_PROVIDER_NAME,
+        DEFAULT_LMSTUDIO_PORT => LMSTUDIO_PROVIDER_NAME,
+        _ => OSS_PROVIDER_NAME,
+    }
+    .to_string();
+    provider
 }
 
 pub fn create_oss_provider_with_base_url(base_url: &str, wire_api: WireApi) -> ModelProviderInfo {
     ModelProviderInfo {
-        name: "gpt-oss".into(),
+        name: OSS_PROVIDER_NAME.into(),
         base_url: Some(base_url.into()),
         env_key: None,
         env_key_instructions: None,

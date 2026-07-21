@@ -59,6 +59,7 @@ use codex_state::log_db;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_absolute_path::canonicalize_existing_preserving_symlinks;
 use codex_utils_home_dir::find_codex_home;
+use codex_utils_oss::configure_aren_oss_model_catalog;
 use codex_utils_oss::ensure_oss_provider_ready;
 use codex_utils_oss::get_default_model_for_oss_provider;
 use color_eyre::eyre::WrapErr;
@@ -96,6 +97,7 @@ mod approval_events;
 mod ascii_animation;
 mod bottom_pane;
 mod branch_summary;
+mod brand;
 mod chatwidget;
 mod cli;
 mod clipboard_copy;
@@ -1059,7 +1061,7 @@ pub async fn run_main(
         ..Default::default()
     };
 
-    let config = load_config_or_exit(
+    let mut config = load_config_or_exit(
         cli_kv_overrides.clone(),
         overrides.clone(),
         loader_overrides.clone(),
@@ -1192,6 +1194,9 @@ pub async fn run_main(
             }
         };
         ensure_oss_provider_ready(provider_id, &config).await?;
+        if crate::brand::AppBrand::current().is_aren() {
+            configure_aren_oss_model_catalog(provider_id, &mut config).await?;
+        }
     }
 
     let otel_logger_layer = otel.as_ref().and_then(|o| o.logger_layer());
@@ -1252,9 +1257,18 @@ async fn run_ratatui_app(
     environment_manager: Arc<EnvironmentManager>,
 ) -> color_eyre::Result<AppExitInfo> {
     let uses_remote_workspace = app_server_target.uses_remote_workspace();
+    let aren_oss_runtime_config =
+        (crate::brand::AppBrand::current().is_aren() && cli.oss).then(|| {
+            (
+                initial_config.model_catalog.clone(),
+                initial_config.model_reasoning_effort.clone(),
+            )
+        });
     color_eyre::install()?;
 
-    tooltips::announcement::prewarm();
+    if !crate::brand::AppBrand::current().is_aren() {
+        tooltips::announcement::prewarm();
+    }
 
     // Forward panic reports through tracing so they appear in the UI status
     // line, but do not swallow the default/color-eyre panic handler.
@@ -1636,6 +1650,10 @@ async fn run_ratatui_app(
         }
         _ => config,
     };
+    if let Some((model_catalog, model_reasoning_effort)) = aren_oss_runtime_config {
+        config.model_catalog = model_catalog;
+        config.model_reasoning_effort = model_reasoning_effort;
+    }
 
     // Configure syntax highlighting theme from the final config — onboarding
     // and resume/fork can both reload config with a different tui_theme, so

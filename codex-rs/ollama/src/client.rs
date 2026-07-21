@@ -21,6 +21,12 @@ use codex_model_provider_info::create_oss_provider_with_base_url;
 
 const OLLAMA_CONNECTION_ERROR: &str = "No running Ollama server detected. Start it with: `ollama serve` (after installing). Install instructions: https://github.com/ollama/ollama?tab=readme-ov-file#ollama";
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OllamaModelMetadata {
+    pub capabilities: Vec<String>,
+    pub context_window: Option<i64>,
+}
+
 /// Client for interacting with a local Ollama instance.
 pub struct OllamaClient {
     client: reqwest::Client,
@@ -128,6 +134,11 @@ impl OllamaClient {
 
     /// Return the capabilities advertised by Ollama for a model.
     pub async fn fetch_model_capabilities(&self, model: &str) -> io::Result<Vec<String>> {
+        Ok(self.fetch_model_metadata(model).await?.capabilities)
+    }
+
+    /// Return the model metadata advertised by Ollama.
+    pub async fn fetch_model_metadata(&self, model: &str) -> io::Result<OllamaModelMetadata> {
         let show_url = format!("{}/api/show", self.host_root.trim_end_matches('/'));
         let resp = self
             .client
@@ -143,7 +154,7 @@ impl OllamaClient {
             )));
         }
         let val = resp.json::<JsonValue>().await.map_err(io::Error::other)?;
-        Ok(val
+        let capabilities = val
             .get("capabilities")
             .and_then(JsonValue::as_array)
             .map(|capabilities| {
@@ -153,7 +164,22 @@ impl OllamaClient {
                     .map(str::to_string)
                     .collect()
             })
-            .unwrap_or_default())
+            .unwrap_or_default();
+        let context_window = val
+            .get("model_info")
+            .and_then(JsonValue::as_object)
+            .and_then(|model_info| {
+                model_info.iter().find_map(|(key, value)| {
+                    key.ends_with(".context_length")
+                        .then(|| value.as_i64())
+                        .flatten()
+                        .filter(|context_window| *context_window > 0)
+                })
+            });
+        Ok(OllamaModelMetadata {
+            capabilities,
+            context_window,
+        })
     }
 
     /// Query the server for its version string, returning `None` when unavailable.
@@ -325,6 +351,49 @@ mod tests {
         let models = client.fetch_models().await.expect("fetch models");
         assert!(models.contains(&"llama3.2:3b".to_string()));
         assert!(models.contains(&"mistral".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_fetch_model_metadata() {
+        if std::env::var(codex_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_ok() {
+            tracing::info!(
+                "{} is set; skipping test_fetch_model_metadata",
+                codex_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR
+            );
+            return;
+        }
+
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .and(wiremock::matchers::path("/api/show"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "capabilities": ["completion", "tools", "thinking"],
+                    "model_info": {
+                        "gptoss.context_length": 131_072,
+                    },
+                })),
+            )
+            .mount(&server)
+            .await;
+
+        let client = OllamaClient::from_host_root(server.uri());
+        let actual = client
+            .fetch_model_metadata("gpt-oss:20b")
+            .await
+            .expect("model metadata");
+
+        assert_eq!(
+            actual,
+            OllamaModelMetadata {
+                capabilities: vec![
+                    "completion".to_string(),
+                    "tools".to_string(),
+                    "thinking".to_string(),
+                ],
+                context_window: Some(131_072),
+            }
+        );
     }
 
     #[tokio::test]

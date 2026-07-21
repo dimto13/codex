@@ -31,8 +31,12 @@ use codex_app_server_protocol::RateLimitWindow;
 use codex_app_server_protocol::SpendControlLimitSnapshot;
 use codex_config::LoaderOverrides;
 use codex_config::types::AuthCredentialsStoreMode;
+use codex_model_provider_info::DEFAULT_OLLAMA_PORT;
 use codex_model_provider_info::ModelProviderAwsAuthInfo;
 use codex_model_provider_info::ModelProviderInfo;
+use codex_model_provider_info::OLLAMA_OSS_PROVIDER_ID;
+use codex_model_provider_info::WireApi;
+use codex_model_provider_info::create_oss_provider;
 use codex_models_manager::test_support::construct_model_info_offline_for_tests;
 use codex_models_manager::test_support::get_model_offline_for_tests;
 use codex_protocol::ThreadId;
@@ -319,6 +323,45 @@ async fn status_snapshot_includes_reasoning_details() {
         }
     }
     let sanitized = sanitize_directory(rendered_lines).join("\n");
+    assert_snapshot!(sanitized);
+}
+
+#[tokio::test]
+async fn status_snapshot_identifies_ollama_provider() {
+    let temp_home = TempDir::new().expect("temp home");
+    let mut config = test_config(&temp_home).await;
+    config.model = Some("gemma4:e4b".to_string());
+    config.model_provider_id = OLLAMA_OSS_PROVIDER_ID.to_string();
+    config.model_provider = create_oss_provider(DEFAULT_OLLAMA_PORT, WireApi::Responses);
+    config.model_reasoning_effort = Some(ReasoningEffort::High);
+    set_workspace_cwd(&mut config, test_path_buf("/workspace/tests").abs());
+    config
+        .permissions
+        .set_permission_profile(PermissionProfile::Disabled)
+        .expect("set permission profile");
+
+    let captured_at = chrono::Local
+        .with_ymd_and_hms(2024, 1, 2, 3, 4, 5)
+        .single()
+        .expect("timestamp");
+    let model_slug = get_model_offline_for_tests(config.model.as_deref());
+    let composite = new_status_output(
+        &config,
+        /*account_display*/ None,
+        /*token_info*/ None,
+        &TokenUsage::default(),
+        &None,
+        /*thread_name*/ None,
+        /*forked_from*/ None,
+        /*rate_limits*/ None,
+        None,
+        captured_at,
+        &model_slug,
+        /*collaboration_mode*/ None,
+        /*reasoning_effort_override*/ None,
+    );
+    let sanitized =
+        sanitize_directory(render_lines(&composite.display_lines(/*width*/ 80))).join("\n");
     assert_snapshot!(sanitized);
 }
 

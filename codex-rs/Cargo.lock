@@ -4322,7 +4322,9 @@ dependencies = [
  "codex-core",
  "codex-lmstudio",
  "codex-model-provider-info",
+ "codex-models-manager",
  "codex-ollama",
+ "codex-protocol",
 ]
 
 [[package]]

@@ -107,12 +107,17 @@ use tracing::instrument;
 use tracing::trace;
 use tracing::warn;
 
+const FORCE_FIRST_TOOL_CALL_METADATA_KEY: &str = "aren_force_first_tool_call";
+
 use crate::attestation::AttestationContext;
 use crate::attestation::AttestationProvider;
 use crate::attestation::X_OAI_ATTESTATION_HEADER;
 use crate::client_common::Prompt;
 use crate::client_common::ResponseEvent;
 use crate::client_common::ResponseStream;
+use crate::context::OssToolRouting;
+use crate::context::apply_oss_turn_reminder;
+use crate::context::oss_tool_routing;
 use crate::feedback_tags;
 use crate::responses_metadata::CodexResponsesMetadata;
 use crate::responses_metadata::subagent_header_value;
@@ -169,6 +174,32 @@ pub(crate) struct CompactConversationRequestSettings {
     pub(crate) effort: Option<ReasoningEffortConfig>,
     pub(crate) summary: ReasoningSummaryConfig,
     pub(crate) service_tier: Option<String>,
+}
+
+fn tool_choice_for_request(
+    prompt: &Prompt,
+    responses_metadata: &CodexResponsesMetadata,
+    oss_tool_routing: OssToolRouting,
+) -> &'static str {
+    let force_first_tool_call = responses_metadata
+        .extra
+        .get(FORCE_FIRST_TOOL_CALL_METADATA_KEY)
+        .is_some_and(|value| value == "true");
+    let has_tool_output = prompt.input.last().is_some_and(|item| {
+        matches!(
+            item,
+            ResponseItem::FunctionCallOutput { .. }
+                | ResponseItem::CustomToolCallOutput { .. }
+                | ResponseItem::ToolSearchOutput { .. }
+        )
+    });
+    if matches!(oss_tool_routing, OssToolRouting::Require(_))
+        || (force_first_tool_call && !prompt.tools.is_empty() && !has_tool_output)
+    {
+        "required"
+    } else {
+        "auto"
+    }
 }
 
 fn reasoning_effort_for_request(effort: ReasoningEffortConfig) -> ReasoningEffortConfig {
@@ -838,7 +869,29 @@ impl ModelClient {
                 .iter_mut()
                 .for_each(ResponseItem::clear_internal_chat_message_metadata_passthrough);
         }
-        let tools = create_tools_json_for_responses_api(&prompt.tools)?;
+        let mut oss_tool_routing = if self.state.provider.info().is_oss() {
+            oss_tool_routing(&input)
+        } else {
+            OssToolRouting::Default
+        };
+        if self.state.provider.info().is_oss()
+            && let Some(current_date) = prompt.current_date.as_deref()
+        {
+            apply_oss_turn_reminder(&mut input, current_date);
+        }
+        let request_tools = match oss_tool_routing {
+            OssToolRouting::Default => prompt.tools.as_slice(),
+            OssToolRouting::Require(name) => {
+                if let Some(tool) = prompt.tools.iter().find(|tool| tool.name() == name) {
+                    std::slice::from_ref(tool)
+                } else {
+                    oss_tool_routing = OssToolRouting::Default;
+                    prompt.tools.as_slice()
+                }
+            }
+            OssToolRouting::Suppress => &[],
+        };
+        let tools = create_tools_json_for_responses_api(request_tools)?;
         let (instructions, tools) = if model_info.use_responses_lite {
             let mut prefix = vec![ResponseItem::AdditionalTools {
                 id: None,
@@ -892,7 +945,8 @@ impl ModelClient {
             instructions,
             input,
             tools,
-            tool_choice: "auto".to_string(),
+            tool_choice: tool_choice_for_request(prompt, responses_metadata, oss_tool_routing)
+                .to_string(),
             parallel_tool_calls: prompt.parallel_tool_calls && !model_info.use_responses_lite,
             reasoning: Some(reasoning),
             store: provider.is_azure_responses_endpoint(),

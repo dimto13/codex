@@ -11,7 +11,9 @@ workspace = true
 codex-core = { workspace = true }
 codex-lmstudio = { workspace = true }
 codex-model-provider-info = { workspace = true }
+codex-models-manager = { workspace = true }
 codex-ollama = { workspace = true }
+codex-protocol = { workspace = true }
 
 [lib]
 doctest = false

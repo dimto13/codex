@@ -29,6 +29,8 @@ use codex_exec_server::HttpRequestParams;
 use codex_login::CodexAuth;
 use codex_mcp::MCP_SANDBOX_STATE_META_CAPABILITY;
 use codex_mcp::SandboxState;
+use codex_model_provider_info::WireApi;
+use codex_model_provider_info::create_oss_provider_with_base_url;
 use codex_models_manager::manager::RefreshStrategy;
 use codex_utils_path_uri::LegacyAppPathString;
 
@@ -686,6 +688,170 @@ async fn stdio_server_round_trip() -> anyhow::Result<()> {
     assert_eq!(output_json["echo"], "ECHOING: ping");
     assert_eq!(output_json["env"], expected_env_value);
 
+    server.verify().await;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+#[serial(mcp_test_value)]
+async fn oss_provider_flattens_dispatches_and_continues_after_stdio_mcp_tools() -> anyhow::Result<()>
+{
+    // TODO(anp): Remove after packaging a Windows stdio test server for Wine exec.
+    skip_if_wine_exec!(
+        Ok(()),
+        "requires a Windows test_stdio_server in the Wine-exec environment"
+    );
+    skip_if_no_network!(Ok(()));
+
+    let server = responses::start_mock_server().await;
+    let call_id = "call-oss-rmcp";
+    let server_name = "rmcp";
+    let flat_tool_name = "mcp__rmcp__echo";
+
+    let call_mock = mount_sse_once(
+        &server,
+        responses::sse(vec![
+            responses::ev_response_created("resp-oss-1"),
+            responses::ev_function_call(call_id, flat_tool_name, "{\"message\":\"ping\"}"),
+            responses::ev_completed("resp-oss-1"),
+        ]),
+    )
+    .await;
+    let final_mock = mount_sse_once(
+        &server,
+        responses::sse(vec![
+            responses::ev_assistant_message("msg-oss-1", "local MCP call completed."),
+            responses::ev_completed("resp-oss-2"),
+        ]),
+    )
+    .await;
+
+    let rmcp_test_server_bin = remote_aware_stdio_server_bin()?;
+    let oss_provider =
+        create_oss_provider_with_base_url(&format!("{}/v1", server.uri()), WireApi::Responses);
+    let fixture = test_codex()
+        .with_config(move |config| {
+            config.model_provider = oss_provider;
+            insert_mcp_server(
+                config,
+                server_name,
+                stdio_transport(rmcp_test_server_bin, /*env*/ None, Vec::new()),
+                TestMcpServerOptions {
+                    environment_id: remote_aware_environment_id(),
+                    ..Default::default()
+                },
+            );
+        })
+        .build_with_auto_env(&server)
+        .await?;
+    wait_for_mcp_server(&fixture.codex, server_name).await?;
+
+    let mut turn = read_only_user_turn(&fixture, "call the rmcp echo tool");
+    let Op::UserInput {
+        responsesapi_client_metadata,
+        ..
+    } = &mut turn
+    else {
+        unreachable!("read_only_user_turn always returns user input");
+    };
+    *responsesapi_client_metadata = Some(HashMap::from([(
+        "aren_force_first_tool_call".to_string(),
+        "true".to_string(),
+    )]));
+    fixture.codex.submit(turn).await?;
+
+    let end_event = wait_for_event(&fixture.codex, |event| {
+        matches!(event, EventMsg::McpToolCallEnd(_))
+    })
+    .await;
+    let EventMsg::McpToolCallEnd(end) = end_event else {
+        unreachable!("event guard guarantees McpToolCallEnd");
+    };
+    let result = end
+        .result
+        .as_ref()
+        .expect("flattened MCP tool call should return success");
+    assert_eq!(result.is_error, Some(false));
+    assert_eq!(
+        result.structured_content.as_ref().unwrap()["echo"],
+        "ECHOING: ping"
+    );
+
+    wait_for_event(&fixture.codex, |event| {
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
+
+    let call_request = call_mock.single_request();
+    let request = call_request.body_json();
+    assert_eq!(request["tool_choice"], "required");
+    let initial_input = call_request.input();
+    let initial_user_message = initial_input
+        .last()
+        .expect("initial OSS request should end with the real user message");
+    let initial_content = initial_user_message["content"]
+        .as_array()
+        .expect("initial real user message should contain input text");
+    assert_eq!(initial_content[0]["text"], "call the rmcp echo tool");
+    let initial_reminder = initial_content
+        .last()
+        .and_then(|content| content["text"].as_str())
+        .expect("initial real user message should end with the turn reminder");
+    assert!(initial_reminder.starts_with("<oss_turn_reminder>\n"));
+    assert!(initial_reminder.contains("System-provided current local date:"));
+    assert!(
+        initial_reminder
+            .contains("<latest_user_request>\ncall the rmcp echo tool\n</latest_user_request>")
+    );
+    assert!(initial_reminder.contains("Do not ask for clarification"));
+    assert!(!initial_reminder.contains("preceding function output"));
+    let flat_tool = request["tools"]
+        .as_array()
+        .expect("request should contain tools")
+        .iter()
+        .find(|tool| tool.get("name").and_then(Value::as_str) == Some(flat_tool_name))
+        .expect("request should expose the flattened MCP tool");
+    assert_eq!(flat_tool.get("type"), Some(&json!("function")));
+    assert!(
+        !request["tools"]
+            .as_array()
+            .expect("request should contain tools")
+            .iter()
+            .any(|tool| {
+                tool.get("type").and_then(Value::as_str) == Some("namespace")
+                    && tool.get("name").and_then(Value::as_str) == Some("mcp__rmcp")
+            })
+    );
+    let final_request = final_mock.single_request();
+    assert_eq!(final_request.body_json()["tool_choice"], "auto");
+    let final_output = final_request.function_call_output(call_id);
+    assert!(final_output.is_object());
+    let final_input = final_request.input();
+    assert_eq!(
+        final_input.last().and_then(|item| item["type"].as_str()),
+        Some("function_call_output")
+    );
+    let final_reminder = final_output["output"]
+        .as_str()
+        .and_then(|output| output.split_once("<oss_turn_reminder>\n"))
+        .map(|(_, reminder)| reminder)
+        .expect("post-tool OSS reminder should be embedded in the function output");
+    assert!(final_reminder.contains("System-provided current local date:"));
+    assert!(
+        final_reminder
+            .contains("<latest_user_request>\ncall the rmcp echo tool\n</latest_user_request>")
+    );
+    assert!(final_reminder.contains("The preceding function output is hidden from the user."));
+    assert!(final_reminder.contains("do not call the same tool again"));
+    assert!(final_reminder.ends_with("\n</oss_turn_reminder>"));
+    assert!(
+        final_input
+            .last()
+            .and_then(|item| item["content"].as_array())
+            .is_none(),
+        "post-tool OSS request should not append a user message after the function output"
+    );
     server.verify().await;
 
     Ok(())

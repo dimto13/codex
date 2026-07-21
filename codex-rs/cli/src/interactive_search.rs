@@ -25,12 +25,16 @@ use codex_ollama::DEFAULT_OSS_MODEL;
 use codex_ollama::OllamaClient;
 use codex_protocol::approvals::ElicitationAction;
 use codex_protocol::models::PermissionProfile;
+use codex_protocol::openai_models::ModelsResponse;
 use codex_protocol::openai_models::ReasoningEffort;
+use codex_protocol::protocol::AdditionalContextEntry;
+use codex_protocol::protocol::AdditionalContextKind;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::Op;
 use codex_protocol::protocol::ReviewDecision;
 use codex_protocol::protocol::SessionSource;
+use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::user_input::UserInput;
 use codex_tui::Cli as TuiCli;
 use codex_utils_absolute_path::AbsolutePathBuf;
@@ -38,6 +42,8 @@ use codex_utils_oss::ensure_oss_provider_ready;
 use codex_utils_oss::get_default_model_for_oss_provider;
 use regex_lite::Regex;
 use serde_json::json;
+use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::future::pending;
 use std::path::Path;
@@ -47,6 +53,8 @@ use std::time::Duration;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tokio::time as tokio_time;
+
+const FORCE_FIRST_TOOL_CALL_METADATA_KEY: &str = "aren_force_first_tool_call";
 
 pub(crate) async fn run_interactive_search(
     mut cli: TuiCli,
@@ -63,6 +71,14 @@ pub(crate) async fn run_interactive_search(
     cli.config_overrides
         .raw_overrides
         .push("web_search=\"live\"".to_string());
+    if cli.oss {
+        // Flattening every connected Codex App creates hundreds of classic function tools,
+        // which overwhelms local models and can make Ollama ignore required tool choice.
+        // Local MCP servers such as Executor remain available.
+        cli.config_overrides
+            .raw_overrides
+            .push("features.apps=false".to_string());
+    }
 
     let cli_kv_overrides = cli
         .config_overrides
@@ -166,7 +182,7 @@ pub(crate) async fn run_interactive_search(
     if let Some(provider_id) = model_provider.as_deref() {
         ensure_oss_provider_ready(provider_id, &config).await?;
         if provider_id == "ollama" {
-            configure_ollama_reasoning(&mut config).await?;
+            configure_ollama_model(&mut config).await?;
         }
     }
 
@@ -210,6 +226,8 @@ pub(crate) async fn run_interactive_search(
     let answer_result = run_headless_session(
         Arc::clone(&thread),
         build_user_inputs(prompt, cli.images.clone()),
+        interactive_search_context(cli.oss),
+        cli.oss,
         json_output,
         timeout_secs.map(Duration::from_secs),
     )
@@ -248,16 +266,55 @@ fn resolve_config_cwd(cwd: Option<&Path>) -> anyhow::Result<AbsolutePathBuf> {
     }
 }
 
-async fn configure_ollama_reasoning(config: &mut codex_core::config::Config) -> anyhow::Result<()> {
-    let model = config.model.as_deref().unwrap_or(DEFAULT_OSS_MODEL);
+async fn configure_ollama_model(config: &mut codex_core::config::Config) -> anyhow::Result<()> {
+    let model = config
+        .model
+        .clone()
+        .unwrap_or_else(|| DEFAULT_OSS_MODEL.to_string());
     let client = OllamaClient::try_from_oss_provider(config).await?;
-    let capabilities = client.fetch_model_capabilities(model).await?;
-    let supports_thinking = capabilities
+    let metadata = client.fetch_model_metadata(&model).await?;
+    let supports_thinking = metadata
+        .capabilities
         .iter()
         .any(|capability| capability == "thinking");
     config.model_reasoning_effort =
         normalize_ollama_reasoning_effort(config.model_reasoning_effort.take(), supports_thinking);
+    install_ollama_model_metadata(config, &model, metadata.context_window);
     Ok(())
+}
+
+fn install_ollama_model_metadata(
+    config: &mut codex_core::config::Config,
+    model: &str,
+    context_window: Option<i64>,
+) {
+    let catalog = config
+        .model_catalog
+        .get_or_insert_with(ModelsResponse::default);
+    if catalog
+        .models
+        .iter()
+        .any(|model_info| model_info.slug == model)
+    {
+        return;
+    }
+
+    catalog
+        .models
+        .push(ollama_model_info(model, context_window));
+}
+
+fn ollama_model_info(
+    model: &str,
+    context_window: Option<i64>,
+) -> codex_protocol::openai_models::ModelInfo {
+    let mut model_info = codex_models_manager::model_info::model_info_from_slug(model);
+    model_info.used_fallback_model_metadata = false;
+    if let Some(context_window) = context_window {
+        model_info.context_window = Some(context_window);
+        model_info.max_context_window = Some(context_window);
+    }
+    model_info
 }
 
 fn normalize_ollama_reasoning_effort(
@@ -286,10 +343,25 @@ fn normalize_ollama_reasoning_effort(
 async fn run_headless_session(
     thread: Arc<CodexThread>,
     items: Vec<UserInput>,
+    additional_context: BTreeMap<String, AdditionalContextEntry>,
+    force_first_tool_call: bool,
     json_output: bool,
     timeout: Option<Duration>,
 ) -> anyhow::Result<String> {
-    let turn_id = thread.submit(items.into()).await?;
+    let turn_id = thread
+        .submit(Op::UserInput {
+            items,
+            final_output_json_schema: None,
+            responsesapi_client_metadata: force_first_tool_call.then(|| {
+                HashMap::from([(
+                    FORCE_FIRST_TOOL_CALL_METADATA_KEY.to_string(),
+                    "true".to_string(),
+                )])
+            }),
+            additional_context,
+            thread_settings: ThreadSettingsOverrides::default(),
+        })
+        .await?;
     let timeout_future = async move {
         match timeout {
             Some(duration) => tokio_time::sleep(duration).await,
@@ -401,6 +473,20 @@ fn build_user_inputs(prompt: String, images: Vec<PathBuf>) -> Vec<UserInput> {
         text_elements: Vec::new(),
     });
     items
+}
+
+fn interactive_search_context(oss: bool) -> BTreeMap<String, AdditionalContextEntry> {
+    if !oss {
+        return BTreeMap::new();
+    }
+
+    BTreeMap::from([(
+        "interactive_search_tools".to_string(),
+        AdditionalContextEntry {
+            value: "Use available tools for current or time-sensitive information. Local Executor MCP tools have names beginning with `mcp__executor__`; for current weather, call `mcp__executor__get_current_weather` when it is available. Do not claim that live access is unavailable before checking for and attempting an appropriate tool.".to_string(),
+            kind: AdditionalContextKind::Application,
+        },
+    )])
 }
 
 fn format_command(command: &[String]) -> String {

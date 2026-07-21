@@ -36,6 +36,18 @@ base_url = "http://localhost:11434/v1"
 }
 
 #[test]
+fn built_in_oss_providers_use_backend_names_and_remain_oss() {
+    let ollama = create_oss_provider(DEFAULT_OLLAMA_PORT, WireApi::Responses);
+    let lmstudio = create_oss_provider(DEFAULT_LMSTUDIO_PORT, WireApi::Responses);
+
+    assert_eq!((ollama.name.as_str(), ollama.is_oss()), ("Ollama", true));
+    assert_eq!(
+        (lmstudio.name.as_str(), lmstudio.is_oss()),
+        ("LM Studio", true)
+    );
+}
+
+#[test]
 fn test_deserialize_azure_model_provider_toml() {
     let azure_provider_toml = r#"
 name = "Azure"

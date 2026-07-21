@@ -1,6 +1,7 @@
 //! Session headers, onboarding guidance, and transcript cards.
 
 use super::*;
+use crate::brand::AppBrand;
 
 pub(crate) const SESSION_HEADER_MAX_INNER_WIDTH: usize = 56; // Just an eyeballed value
 
@@ -146,6 +147,7 @@ pub(crate) fn new_session_info(
     auth_plan: Option<PlanType>,
     show_fast_status: bool,
 ) -> SessionInfoCell {
+    let brand = AppBrand::current();
     // Header box rendered as history (so it appears at the very top)
     let header = SessionHeaderHistoryCell::new(
         session.model.clone(),
@@ -154,6 +156,7 @@ pub(crate) fn new_session_info(
         config.cwd.to_path_buf(),
         CODEX_CLI_VERSION,
     )
+    .with_brand(brand)
     .with_yolo_mode(has_yolo_permissions(
         session.approval_policy,
         &session.permission_profile,
@@ -170,7 +173,11 @@ pub(crate) fn new_session_info(
             Line::from(vec![
                 "  ".into(),
                 "/init".into(),
-                " - create an AGENTS.md file with instructions for Codex".dim(),
+                format!(
+                    " - create an AGENTS.md file with instructions for {}",
+                    brand.product_name()
+                )
+                .dim(),
             ]),
             Line::from(vec![
                 "  ".into(),
@@ -180,7 +187,7 @@ pub(crate) fn new_session_info(
             Line::from(vec![
                 "  ".into(),
                 "/permissions".into(),
-                " - choose what Codex is allowed to do".dim(),
+                format!(" - choose what {} is allowed to do", brand.product_name()).dim(),
             ]),
             Line::from(vec![
                 "  ".into(),
@@ -239,6 +246,7 @@ pub(crate) fn has_yolo_permissions(
 }
 #[derive(Debug)]
 pub(crate) struct SessionHeaderHistoryCell {
+    brand: AppBrand,
     version: &'static str,
     model: String,
     model_style: Style,
@@ -275,6 +283,7 @@ impl SessionHeaderHistoryCell {
         version: &'static str,
     ) -> Self {
         Self {
+            brand: AppBrand::current(),
             version,
             model,
             model_style,
@@ -287,6 +296,11 @@ impl SessionHeaderHistoryCell {
 
     pub(crate) fn with_yolo_mode(mut self, yolo_mode: bool) -> Self {
         self.yolo_mode = yolo_mode;
+        self
+    }
+
+    pub(crate) fn with_brand(mut self, brand: AppBrand) -> Self {
+        self.brand = brand;
         self
     }
 
@@ -332,10 +346,10 @@ impl HistoryCell for SessionHeaderHistoryCell {
 
         let make_row = |spans: Vec<Span<'static>>| Line::from(spans);
 
-        // Title line rendered inside the box: ">_ OpenAI Codex (vX)"
+        // Title line rendered inside the box: ">_ OpenAI Codex (vX)" or ">_ Aren (vX)".
         let title_spans: Vec<Span<'static>> = vec![
             Span::from(">_ ").dim(),
-            Span::from("OpenAI Codex").bold(),
+            Span::from(self.brand.display_name()).bold(),
             Span::from(" ").dim(),
             Span::from(format!("(v{})", self.version)).dim(),
         ];
@@ -402,7 +416,7 @@ impl HistoryCell for SessionHeaderHistoryCell {
 
     fn raw_lines(&self) -> Vec<Line<'static>> {
         let mut lines = vec![
-            Line::from(format!("OpenAI Codex (v{})", self.version)),
+            Line::from(format!("{} (v{})", self.brand.display_name(), self.version)),
             Line::from(format!(
                 "model: {}{}",
                 self.model,

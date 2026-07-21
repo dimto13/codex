@@ -3089,6 +3089,45 @@ async fn model_selection_popup_snapshot() {
 }
 
 #[tokio::test]
+async fn aren_local_model_selection_popup_snapshot() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-oss:20b")).await;
+    chat.thread_id = Some(ThreadId::new());
+    chat.config.model_provider = chat
+        .config
+        .model_providers
+        .get(codex_model_provider_info::OLLAMA_OSS_PROVIDER_ID)
+        .expect("built-in Ollama provider")
+        .clone();
+    let preset = ModelPreset {
+        id: "gpt-oss:20b".to_string(),
+        model: "gpt-oss:20b".to_string(),
+        display_name: "gpt-oss:20b".to_string(),
+        description: "Installed locally in Ollama.".to_string(),
+        default_reasoning_effort: ReasoningEffortConfig::High,
+        supported_reasoning_efforts: vec![ReasoningEffortPreset {
+            effort: ReasoningEffortConfig::High,
+            description: "Greater reasoning depth for complex problems".to_string(),
+        }],
+        supports_personality: false,
+        additional_speed_tiers: Vec::new(),
+        service_tiers: Vec::new(),
+        default_service_tier: None,
+        is_default: true,
+        upgrade: None,
+        show_in_picker: true,
+        multi_agent_version: None,
+        availability_nux: None,
+        supported_in_api: true,
+        input_modalities: default_input_modalities(),
+    };
+
+    chat.open_all_models_popup_for_brand(vec![preset], crate::brand::AppBrand::Aren);
+
+    let popup = render_bottom_popup(&chat, /*width*/ 80);
+    assert_chatwidget_snapshot!("aren_local_model_selection_popup", popup);
+}
+
+#[tokio::test]
 async fn personality_selection_popup_snapshot() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.4")).await;
     chat.thread_id = Some(ThreadId::new());

@@ -8,6 +8,8 @@ use codex_mcp::ToolInfo;
 use codex_model_provider::create_model_provider;
 use codex_model_provider_info::AMAZON_BEDROCK_PROVIDER_ID;
 use codex_model_provider_info::ModelProviderInfo;
+use codex_model_provider_info::WireApi;
+use codex_model_provider_info::create_oss_provider_with_base_url;
 use codex_protocol::config_types::WebSearchMode;
 use codex_protocol::dynamic_tools::DynamicToolSpec;
 use codex_protocol::openai_models::ApplyPatchToolType;
@@ -268,6 +270,15 @@ fn use_bedrock_provider(turn: &mut TurnContext) {
     let provider_info = ModelProviderInfo::create_amazon_bedrock_provider(/*aws*/ None);
     update_config(turn, |config| {
         config.model_provider_id = AMAZON_BEDROCK_PROVIDER_ID.to_string();
+        config.model_provider = provider_info.clone();
+    });
+    turn.provider = create_model_provider(provider_info, turn.auth_manager.clone());
+}
+
+fn use_oss_provider(turn: &mut TurnContext) {
+    let provider_info =
+        create_oss_provider_with_base_url("http://localhost:11434/v1", WireApi::Responses);
+    update_config(turn, |config| {
         config.model_provider = provider_info.clone();
     });
     turn.provider = create_model_provider(provider_info, turn.auth_manager.clone());
@@ -805,6 +816,31 @@ async fn mcp_and_tool_search_follow_direct_and_deferred_tool_exposure() {
         "tool_search",
         &ToolName::namespaced("mcp__searchable", "lookup").to_string(),
     ]);
+}
+
+#[tokio::test]
+async fn oss_provider_flattens_mcp_tools_for_classic_function_calling() {
+    let plan = probe_with(
+        use_oss_provider,
+        ToolPlanInputs {
+            mcp_tools: Some(vec![mcp_tool(
+                "executor",
+                "mcp__executor",
+                "get_current_weather",
+            )]),
+            ..ToolPlanInputs::default()
+        },
+    )
+    .await;
+
+    let flat_name = "mcp__executor__get_current_weather";
+    plan.assert_visible_contains(&[flat_name]);
+    plan.assert_registered_contains(&[flat_name]);
+    assert!(plan.namespace_function_names("mcp__executor").is_empty());
+    let ToolSpec::Function(tool) = plan.visible_spec(flat_name) else {
+        panic!("flattened MCP tool should be a classic function");
+    };
+    assert_eq!(tool.name, flat_name);
 }
 
 #[tokio::test]

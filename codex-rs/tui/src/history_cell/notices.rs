@@ -82,6 +82,14 @@ impl HistoryCell for UpdateAvailableHistoryCell {
 }
 #[allow(clippy::disallowed_methods)]
 pub(crate) fn new_warning_event(message: String) -> PrefixedWrappedHistoryCell {
+    let message = if crate::brand::AppBrand::current().is_aren() {
+        message.replace(
+            "Codex can still see every skill",
+            "Aren can still see every skill",
+        )
+    } else {
+        message
+    };
     PrefixedWrappedHistoryCell::new(message.yellow(), "⚠ ".yellow(), "  ")
 }
 

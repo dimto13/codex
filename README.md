@@ -8,7 +8,14 @@ If you want Codex in your code editor (VS Code, Cursor, Windsurf), <a href="http
 </br>If you are looking for the <em>cloud-based agent</em> from OpenAI, <strong>Codex Web</strong>, go to <a href="https://chatgpt.com/codex">chatgpt.com/codex</a>.</p>
 
 ---
+# Meine Anforderungen
 
+- [x] Standard-Modellauswahl: `gemma4:e4b` mit hohem Reasoning-Aufwand.
+- [x] Standard-Berechtigungen: voller Zugriff ohne Sandbox und Rückfragen.
+- [x] Ein einfacher Aufruf von `aren` aktiviert automatisch OSS, Ollama und die
+  oben genannten Standardwerte; zusätzliche Startparameter sind nicht nötig.
+
+---
 ## Quickstart
 
 ### Installing and running Codex CLI

@@ -1,0 +1,10 @@
+---
+source: tui/src/chatwidget/tests/popups_and_settings.rs
+expression: popup
+---
+  Select Local Model and Effort
+  Models installed in Ollama. Add more with `ollama pull <model_name>`.
+
+› 1. gpt-oss:20b (current)  Installed locally in Ollama.
+
+  Press enter to confirm or esc to go back

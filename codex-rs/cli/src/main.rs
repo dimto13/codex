@@ -36,7 +36,10 @@ use codex_tui::UpdateAction;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_cli::CliConfigOverrides;
 use codex_utils_cli::ProfileV2Name;
+use codex_utils_cli::SandboxModeCliArg;
 use codex_utils_cli::SharedCliOptions;
+use codex_utils_oss::AREN_DEFAULT_OLLAMA_MODEL;
+use codex_utils_oss::AREN_DEFAULT_OSS_PROVIDER;
 use owo_colors::OwoColorize;
 use std::collections::HashSet;
 use std::ffi::OsStr;
@@ -1023,6 +1026,25 @@ fn current_invocation_is_aren() -> bool {
     invocation_name_is_aren(std::env::args_os().next().as_deref())
 }
 
+fn apply_aren_interactive_defaults(interactive: &mut TuiCli) {
+    interactive.oss = true;
+    interactive
+        .oss_provider
+        .get_or_insert_with(|| AREN_DEFAULT_OSS_PROVIDER.to_string());
+    interactive
+        .model
+        .get_or_insert_with(|| AREN_DEFAULT_OLLAMA_MODEL.to_string());
+
+    if !interactive.dangerously_bypass_approvals_and_sandbox {
+        interactive
+            .sandbox_mode
+            .get_or_insert(SandboxModeCliArg::DangerFullAccess);
+        interactive
+            .approval_policy
+            .get_or_insert(codex_utils_cli::ApprovalModeCliArg::Never);
+    }
+}
+
 fn parse_multitool_cli() -> MultitoolCli {
     let arg0 = std::env::args_os().next();
     let matches = multitool_command_for_invocation(arg0.as_deref()).get_matches();
@@ -1044,6 +1066,9 @@ async fn cli_main(
     // Fold --enable/--disable into config overrides so they flow to all subcommands.
     let toggle_overrides = feature_toggles.to_overrides()?;
     root_config_overrides.raw_overrides.extend(toggle_overrides);
+    if current_invocation_is_aren() {
+        apply_aren_interactive_defaults(&mut interactive);
+    }
     let root_remote = remote.remote;
     let root_remote_auth_token_env = remote.remote_auth_token_env;
     let root_strict_config = interactive.strict_config;
@@ -3060,6 +3085,60 @@ mod tests {
             panic!("--version should short-circuit parsing");
         };
         assert!(error.to_string().starts_with("aren "));
+    }
+
+    #[test]
+    fn aren_invocation_defaults_to_local_gemma_with_full_access() {
+        let mut interactive = TuiCli::try_parse_from(["aren"]).expect("parse");
+
+        apply_aren_interactive_defaults(&mut interactive);
+
+        assert!(interactive.oss);
+        assert_eq!(
+            interactive.oss_provider.as_deref(),
+            Some(AREN_DEFAULT_OSS_PROVIDER)
+        );
+        assert_eq!(
+            interactive.model.as_deref(),
+            Some(AREN_DEFAULT_OLLAMA_MODEL)
+        );
+        assert!(matches!(
+            interactive.sandbox_mode,
+            Some(SandboxModeCliArg::DangerFullAccess)
+        ));
+        assert!(matches!(
+            interactive.approval_policy,
+            Some(codex_utils_cli::ApprovalModeCliArg::Never)
+        ));
+    }
+
+    #[test]
+    fn aren_invocation_preserves_explicit_runtime_choices() {
+        let mut interactive = TuiCli::try_parse_from([
+            "aren",
+            "--local-provider",
+            "lmstudio",
+            "--model",
+            "local-model",
+            "--sandbox",
+            "read-only",
+            "--ask-for-approval",
+            "on-request",
+        ])
+        .expect("parse");
+
+        apply_aren_interactive_defaults(&mut interactive);
+
+        assert_eq!(interactive.oss_provider.as_deref(), Some("lmstudio"));
+        assert_eq!(interactive.model.as_deref(), Some("local-model"));
+        assert!(matches!(
+            interactive.sandbox_mode,
+            Some(SandboxModeCliArg::ReadOnly)
+        ));
+        assert!(matches!(
+            interactive.approval_policy,
+            Some(codex_utils_cli::ApprovalModeCliArg::OnRequest)
+        ));
     }
 
     #[test]

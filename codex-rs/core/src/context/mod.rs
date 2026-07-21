@@ -19,6 +19,7 @@ mod legacy_unified_exec_process_limit_warning;
 mod model_switch_instructions;
 mod multi_agent_mode_instructions;
 mod network_rule_saved;
+mod oss_turn_reminder;
 mod permissions_instructions;
 mod personality_spec_instructions;
 mod plugin_instructions;
@@ -61,6 +62,10 @@ pub(crate) use legacy_unified_exec_process_limit_warning::LegacyUnifiedExecProce
 pub(crate) use model_switch_instructions::ModelSwitchInstructions;
 pub(crate) use multi_agent_mode_instructions::MultiAgentModeInstructions;
 pub(crate) use network_rule_saved::NetworkRuleSaved;
+pub(crate) use oss_turn_reminder::OssToolRouting;
+pub(crate) use oss_turn_reminder::OssTurnReminder;
+pub(crate) use oss_turn_reminder::apply_oss_turn_reminder;
+pub(crate) use oss_turn_reminder::oss_tool_routing;
 pub use permissions_instructions::ApprovalPromptContext;
 pub use permissions_instructions::PermissionsInstructions;
 pub(crate) use personality_spec_instructions::PersonalitySpecInstructions;
