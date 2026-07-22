@@ -14,6 +14,9 @@ If you want Codex in your code editor (VS Code, Cursor, Windsurf), <a href="http
 - [x] Standard-Berechtigungen: voller Zugriff ohne Sandbox und Rückfragen.
 - [x] Ein einfacher Aufruf von `aren` aktiviert automatisch OSS, Ollama und die
   oben genannten Standardwerte; zusätzliche Startparameter sind nicht nötig.
+- [x] Allgemeine lokale Anfragen zu Dateien, Systemzustand und Git werden mit
+  den vorhandenen Shell-Werkzeugen gelöst; große MCP-/App-Werkzeugkataloge
+  werden pro Anfrage relevant gefiltert statt durch Einzelfall-Skripte ersetzt.
 
 ---
 ## Quickstart

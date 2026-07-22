@@ -133,6 +133,10 @@ fn latest_user_request(input: &[ResponseItem]) -> Option<(usize, String)> {
     Some((index, request[..end].to_string()))
 }
 
+pub(crate) fn latest_user_request_text(input: &[ResponseItem]) -> Option<String> {
+    latest_user_request(input).map(|(_, request)| request)
+}
+
 fn classify_turn_intent(request: &str) -> OssTurnIntent {
     let request = request.to_lowercase();
     if [

@@ -65,6 +65,7 @@ pub(crate) use network_rule_saved::NetworkRuleSaved;
 pub(crate) use oss_turn_reminder::OssToolRouting;
 pub(crate) use oss_turn_reminder::OssTurnReminder;
 pub(crate) use oss_turn_reminder::apply_oss_turn_reminder;
+pub(crate) use oss_turn_reminder::latest_user_request_text;
 pub(crate) use oss_turn_reminder::oss_tool_routing;
 pub use permissions_instructions::ApprovalPromptContext;
 pub use permissions_instructions::PermissionsInstructions;

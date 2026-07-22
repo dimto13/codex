@@ -117,10 +117,12 @@ use crate::client_common::ResponseEvent;
 use crate::client_common::ResponseStream;
 use crate::context::OssToolRouting;
 use crate::context::apply_oss_turn_reminder;
+use crate::context::latest_user_request_text;
 use crate::context::oss_tool_routing;
 use crate::feedback_tags;
 use crate::responses_metadata::CodexResponsesMetadata;
 use crate::responses_metadata::subagent_header_value;
+use crate::tools::oss_request_tool_selection::select_oss_request_tools;
 use crate::util::emit_feedback_auth_recovery_tags;
 use codex_feedback::FeedbackRequestTags;
 use codex_feedback::emit_feedback_request_tags_with_auth_env;
@@ -869,18 +871,24 @@ impl ModelClient {
                 .iter_mut()
                 .for_each(ResponseItem::clear_internal_chat_message_metadata_passthrough);
         }
-        let mut oss_tool_routing = if self.state.provider.info().is_oss() {
+        let is_oss = self.state.provider.info().is_oss();
+        let latest_user_request = is_oss.then(|| latest_user_request_text(&input)).flatten();
+        let mut oss_tool_routing = if is_oss {
             oss_tool_routing(&input)
         } else {
             OssToolRouting::Default
         };
-        if self.state.provider.info().is_oss()
-            && let Some(current_date) = prompt.current_date.as_deref()
-        {
+        if is_oss && let Some(current_date) = prompt.current_date.as_deref() {
             apply_oss_turn_reminder(&mut input, current_date);
         }
+        let selected_oss_tools = (is_oss && matches!(oss_tool_routing, OssToolRouting::Default))
+            .then(|| {
+                select_oss_request_tools(latest_user_request.as_deref(), prompt.tools.as_slice())
+            });
         let request_tools = match oss_tool_routing {
-            OssToolRouting::Default => prompt.tools.as_slice(),
+            OssToolRouting::Default => selected_oss_tools
+                .as_deref()
+                .unwrap_or(prompt.tools.as_slice()),
             OssToolRouting::Require(name) => {
                 if let Some(tool) = prompt.tools.iter().find(|tool| tool.name() == name) {
                     std::slice::from_ref(tool)
