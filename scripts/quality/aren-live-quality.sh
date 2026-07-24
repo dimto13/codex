@@ -62,6 +62,7 @@ for index in "${!queries[@]}"; do
   python3 - "${output_path}" <<'PY'
 import json
 import pathlib
+import re
 import sys
 
 path = pathlib.Path(sys.argv[1])
@@ -74,6 +75,17 @@ if not isinstance(sources, list) or not sources:
     raise SystemExit(f"{path}: no sources were returned")
 if not all(isinstance(source, str) and source.startswith(("http://", "https://")) for source in sources):
     raise SystemExit(f"{path}: malformed source URL")
+
+chrome_failure = re.compile(
+    r"(?is)(?:"
+    r"chrome.{0,160}(?:abgebrochen|blockiert|blocked|could not|failed|fehlgeschlagen|"
+    r"konnte.{0,40}nicht|nicht (?:erreichbar|verfügbar)|unavailable)"
+    r"|(?:abgebrochen|blockiert|blocked|could not|failed|fehlgeschlagen|"
+    r"nicht (?:erreichbar|verfügbar)|unavailable).{0,160}chrome"
+    r")"
+)
+if chrome_failure.search(answer):
+    raise SystemExit(f"{path}: Chrome was not successfully used")
 PY
 done
 

@@ -44,37 +44,25 @@ If you want Codex in your code editor (VS Code, Cursor, Windsurf), <a href="http
   wiederholbaren Quick-/Full-Live-Qualitätssuite einschließlich Chrome MCP
   geprüft.
 
-## OFFEN: Home-Rebrand `.codex` → `.aren` noch nicht wirksam
+## Verifizierter Aren-Stand
 
-> Vermerkt 2026-07-23. In einer späteren Session vollständig auflösen/migrieren.
-> Punkt 1 der Anforderungen oben ist erst im Quellcode umgesetzt, **nicht** in den
-> laufenden Binaries.
-
-**Ist-Zustand (empirisch verifiziert):**
-- Beide `codex`-Binaries lösen ihr Home real auf `~/.codex` auf (`codex doctor` →
-  `CODEX_HOME → ~/.codex`):
-  - PATH `/usr/local/bin/codex` → Symlink auf `@openai/codex` (node_modules, JS-Wrapper)
-  - lokaler Build `codex-rs/target/release/codex` (22.07.2026): Binary enthält 402× `.codex`
-    vs. 7× `.aren`, Fehlertext noch „CODEX_HOME points to".
-- `AREN_HOME` ist **nicht** gesetzt.
-- Aktives Config-Home = `~/.codex/` (config.toml, auth.json, Trust-Levels,
-  `[mcp_servers.*]` inkl. `executor` und `chrome-devtools`).
-- `~/.aren/` existiert, aber nur teilbefüllt: `mcp-oauth-locks/`, `proxy/`, `tmp/` —
-  **keine** config.toml, **keine** auth.json.
-
-**Ursache:** Quellcode ist schon rebranded (`codex-rs/utils/home-dir/src/lib.rs`:
-`find_codex_home()` defaultet auf `~/.aren`, Override `AREN_HOME`), aber die
-installierten/gebauten Binaries stammen noch aus dem `.codex`-Stand. Einzelne
-neuere Subsysteme (MCP-OAuth-Locks, Proxy, Temp) schreiben bereits nach `~/.aren`
-→ daher der halb-gefüllte Ordner.
-
-**Zu tun (später):**
-1. Richtung festlegen: konsequent auf `.aren` migrieren **oder** Rebrand im Code zurückdrehen.
-2. Bei Migration: `~/.codex/*` (config.toml, auth.json, Trust-Levels, MCP-Server)
-   nach `~/.aren` übernehmen; übergangsweise `export AREN_HOME=$HOME/.codex`.
-3. Binaries aus aktuellem Source neu bauen/installieren, damit PATH-`codex` und
-   lokaler Build dasselbe Home nutzen.
-4. Klären, ob PATH-`codex` (openai/codex node_modules) durch den aren-Build ersetzt wird.
+- `aren-v0.1.1` ist als unveränderlicher GitHub Release veröffentlicht und unter
+  `~/.local/lib/aren/aren-v0.1.1/aren` installiert. Der atomare Symlink
+  `~/.local/bin/aren` aktiviert diese Version; `aren-v0.1.0` bleibt als lokaler
+  Rollback erhalten.
+- Aren verwendet real `~/.aren`. `config.toml` und `auth.json` wurden mit den
+  restriktiven Rechten `0600` übernommen, das Verzeichnis selbst verwendet
+  `0700`. Die offizielle `codex`-Installation bleibt getrennt und unverändert.
+- Chrome DevTools MCP läuft headless mit einem isolierten temporären Profil.
+  Dadurch können Aren, Codex und wiederholte Qualitätstests parallel arbeiten,
+  ohne sich am Standard-Chrome-Profil zu blockieren.
+- Die Quick- und Full-Live-Suite wurde am 24. Juli 2026 mit dem installierten
+  Release erfolgreich ausgeführt. Die Full-Suite prüfte IANA, Datum/Zeitzone
+  für Berlin und den aktuellen offiziellen Rust-Release über Chrome.
+- `aren-v0.1.0` bleibt als erster nachvollziehbarer Release bestehen. Der
+  verpflichtende Live-Test fand dort eine abgebrochene Chrome-Freigabe; der
+  selektiv abgesicherte Fix wurde deshalb als Patch-Release `aren-v0.1.1`
+  veröffentlicht, statt den vorhandenen Tag nachträglich zu verändern.
 
 ---
 ## Quickstart
