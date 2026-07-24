@@ -14,7 +14,7 @@ const SOURCE_EXTERNAL_AGENT_UPPER_PRODUCT_NAME: &str = "CLAUDE-CODE";
 fn fixture_paths() -> (TempDir, PathBuf, PathBuf) {
     let root = TempDir::new().expect("create tempdir");
     let external_agent_home = root.path().join(EXTERNAL_AGENT_DIR);
-    let codex_home = root.path().join(".codex");
+    let codex_home = root.path().join(".aren");
     (root, external_agent_home, codex_home)
 }
 
@@ -202,7 +202,7 @@ async fn detect_repo_lists_agents_md_for_each_cwd() {
 
     let items = service_for_paths(
         root.path().join(EXTERNAL_AGENT_DIR),
-        root.path().join(".codex"),
+        root.path().join(".aren"),
     )
     .detect(ExternalAgentConfigDetectOptions {
         include_home: false,
@@ -241,7 +241,7 @@ async fn detect_repo_lists_agents_md_for_each_cwd() {
 async fn detect_repo_still_reports_non_plugin_items_when_home_config_is_invalid() {
     let root = TempDir::new().expect("create tempdir");
     let repo_root = root.path().join("repo");
-    let codex_home = root.path().join(".codex");
+    let codex_home = root.path().join(".aren");
     fs::create_dir_all(repo_root.join(".git")).expect("create git dir");
     fs::create_dir_all(
         repo_root
@@ -296,7 +296,7 @@ async fn detect_repo_still_reports_non_plugin_items_when_home_config_is_invalid(
                         .join(EXTERNAL_AGENT_DIR)
                         .join("settings.json")
                         .display(),
-                    repo_root.join(".codex").join("config.toml").display()
+                    repo_root.join(".aren").join("config.toml").display()
                 ),
                 cwd: Some(repo_root.clone()),
                 details: None,
@@ -374,7 +374,7 @@ async fn detect_repo_lists_mcp_hooks_commands_and_subagents() {
 
     let items = service_for_paths(
         root.path().join(EXTERNAL_AGENT_DIR),
-        root.path().join(".codex"),
+        root.path().join(".aren"),
     )
     .detect(ExternalAgentConfigDetectOptions {
         include_home: false,
@@ -391,7 +391,7 @@ async fn detect_repo_lists_mcp_hooks_commands_and_subagents() {
                 description: format!(
                     "Migrate MCP servers from {} into {}",
                     repo_root.display(),
-                    repo_root.join(".codex").join("config.toml").display()
+                    repo_root.join(".aren").join("config.toml").display()
                 ),
                 cwd: Some(repo_root.clone()),
                 details: Some(MigrationDetails {
@@ -406,7 +406,7 @@ async fn detect_repo_lists_mcp_hooks_commands_and_subagents() {
                 description: format!(
                     "Migrate hooks from {} to {}",
                     repo_root.join(EXTERNAL_AGENT_DIR).display(),
-                    repo_root.join(".codex").join("hooks.json").display()
+                    repo_root.join(".aren").join("hooks.json").display()
                 ),
                 cwd: Some(repo_root.clone()),
                 details: Some(MigrationDetails {
@@ -439,7 +439,7 @@ async fn detect_repo_lists_mcp_hooks_commands_and_subagents() {
                 description: format!(
                     "Migrate subagents from {} to {}",
                     repo_root.join(EXTERNAL_AGENT_DIR).join("agents").display(),
-                    repo_root.join(".codex").join("agents").display()
+                    repo_root.join(".aren").join("agents").display()
                 ),
                 cwd: Some(repo_root),
                 details: Some(MigrationDetails {
@@ -467,7 +467,7 @@ async fn detect_repo_skips_hooks_when_only_unsupported_hooks_exist() {
 
     let items = service_for_paths(
         root.path().join(EXTERNAL_AGENT_DIR),
-        root.path().join(".codex"),
+        root.path().join(".aren"),
     )
     .detect(ExternalAgentConfigDetectOptions {
         include_home: false,
@@ -540,7 +540,7 @@ async fn import_repo_migrates_mcp_hooks_commands_and_subagents() {
 
     service_for_paths(
         root.path().join(EXTERNAL_AGENT_DIR),
-        root.path().join(".codex"),
+        root.path().join(".aren"),
     )
     .import(vec![
         ExternalAgentConfigMigrationItem {
@@ -571,7 +571,7 @@ async fn import_repo_migrates_mcp_hooks_commands_and_subagents() {
     .await;
 
     let config: TomlValue = toml::from_str(
-        &fs::read_to_string(repo_root.join(".codex").join("config.toml")).expect("read config"),
+        &fs::read_to_string(repo_root.join(".aren").join("config.toml")).expect("read config"),
     )
     .expect("parse config");
     let expected_config: TomlValue = toml::from_str(
@@ -607,7 +607,7 @@ STATIC = "yes"
         .expect("migrated MCP config should be supported");
 
     let hooks: JsonValue = serde_json::from_str(
-        &fs::read_to_string(repo_root.join(".codex").join("hooks.json")).expect("read hooks"),
+        &fs::read_to_string(repo_root.join(".aren").join("hooks.json")).expect("read hooks"),
     )
     .expect("parse hooks");
     let _supported_hooks: codex_config::HooksFile =
@@ -635,7 +635,7 @@ STATIC = "yes"
     );
     assert!(
         !repo_root
-            .join(".codex")
+            .join(".aren")
             .join("hooks.migration-notes.md")
             .exists()
     );
@@ -655,7 +655,7 @@ STATIC = "yes"
     let agent: TomlValue = toml::from_str(
         &fs::read_to_string(
             repo_root
-                .join(".codex")
+                .join(".aren")
                 .join("agents")
                 .join("researcher.toml"),
         )
@@ -698,19 +698,15 @@ async fn import_repo_mcp_preserves_existing_same_named_server() {
         }"#,
     )
     .expect("write mcp");
-    fs::create_dir_all(repo_root.join(".codex")).expect("create codex dir");
+    fs::create_dir_all(repo_root.join(".aren")).expect("create codex dir");
     let existing_config = r#"[mcp_servers.mixedTransport]
 url = "https://example.com/mixed-transport"
 "#;
-    fs::write(
-        repo_root.join(".codex").join("config.toml"),
-        existing_config,
-    )
-    .expect("write config");
+    fs::write(repo_root.join(".aren").join("config.toml"), existing_config).expect("write config");
 
     let service = service_for_paths(
         root.path().join(EXTERNAL_AGENT_DIR),
-        root.path().join(".codex"),
+        root.path().join(".aren"),
     );
     assert_eq!(
         service
@@ -733,7 +729,7 @@ url = "https://example.com/mixed-transport"
         .await;
 
     assert_eq!(
-        fs::read_to_string(repo_root.join(".codex").join("config.toml")).expect("read config"),
+        fs::read_to_string(repo_root.join(".aren").join("config.toml")).expect("read config"),
         existing_config
     );
 }
@@ -753,9 +749,9 @@ async fn detect_repo_mcp_lists_only_missing_servers() {
         }"#,
     )
     .expect("write mcp");
-    fs::create_dir_all(repo_root.join(".codex")).expect("create codex dir");
+    fs::create_dir_all(repo_root.join(".aren")).expect("create codex dir");
     fs::write(
-        repo_root.join(".codex").join("config.toml"),
+        repo_root.join(".aren").join("config.toml"),
         r#"[mcp_servers.mixedTransport]
 url = "https://example.com/mixed-transport"
 "#,
@@ -764,7 +760,7 @@ url = "https://example.com/mixed-transport"
 
     let items = service_for_paths(
         root.path().join(EXTERNAL_AGENT_DIR),
-        root.path().join(".codex"),
+        root.path().join(".aren"),
     )
     .detect(ExternalAgentConfigDetectOptions {
         include_home: false,
@@ -780,7 +776,7 @@ url = "https://example.com/mixed-transport"
             description: format!(
                 "Migrate MCP servers from {} into {}",
                 repo_root.display(),
-                repo_root.join(".codex").join("config.toml").display()
+                repo_root.join(".aren").join("config.toml").display()
             ),
             cwd: Some(repo_root),
             details: Some(MigrationDetails {
@@ -1220,7 +1216,7 @@ async fn import_repo_agents_md_from_nested_cwd_rewrites_terms_and_skips_non_empt
 
     let outcome = service_for_paths(
         root.path().join(EXTERNAL_AGENT_DIR),
-        root.path().join(".codex"),
+        root.path().join(".aren"),
     )
     .import(vec![
         ExternalAgentConfigMigrationItem {
@@ -1294,7 +1290,7 @@ async fn import_repo_agents_md_overwrites_empty_targets() {
 
     let outcome = service_for_paths(
         root.path().join(EXTERNAL_AGENT_DIR),
-        root.path().join(".codex"),
+        root.path().join(".aren"),
     )
     .import(vec![ExternalAgentConfigMigrationItem {
         item_type: ExternalAgentConfigMigrationItemType::AgentsMd,
@@ -1347,7 +1343,7 @@ async fn detect_repo_prefers_non_empty_external_agent_agents_source() {
 
     let items = service_for_paths(
         root.path().join(EXTERNAL_AGENT_DIR),
-        root.path().join(".codex"),
+        root.path().join(".aren"),
     )
     .detect(ExternalAgentConfigDetectOptions {
         include_home: false,
@@ -1380,21 +1376,21 @@ async fn import_repo_hooks_preserves_disabled_codex_hooks_feature() {
     let repo_root = root.path().join("repo");
     fs::create_dir_all(repo_root.join(".git")).expect("create git dir");
     fs::create_dir_all(repo_root.join(EXTERNAL_AGENT_DIR)).expect("create external agent dir");
-    fs::create_dir_all(repo_root.join(".codex")).expect("create codex dir");
+    fs::create_dir_all(repo_root.join(".aren")).expect("create codex dir");
     fs::write(
         repo_root.join(EXTERNAL_AGENT_DIR).join("settings.json"),
         r#"{"hooks":{"Stop":[{"hooks":[{"command":"echo done"}]}]}}"#,
     )
     .expect("write hooks");
     fs::write(
-        repo_root.join(".codex").join("config.toml"),
+        repo_root.join(".aren").join("config.toml"),
         "[features]\ncodex_hooks = false\n",
     )
     .expect("write config");
 
     let outcome = service_for_paths(
         root.path().join(EXTERNAL_AGENT_DIR),
-        root.path().join(".codex"),
+        root.path().join(".aren"),
     )
     .import(vec![ExternalAgentConfigMigrationItem {
         item_type: ExternalAgentConfigMigrationItemType::Hooks,
@@ -1422,11 +1418,11 @@ async fn import_repo_hooks_preserves_disabled_codex_hooks_feature() {
         }]
     );
     assert_eq!(
-        fs::read_to_string(repo_root.join(".codex").join("config.toml")).expect("read config"),
+        fs::read_to_string(repo_root.join(".aren").join("config.toml")).expect("read config"),
         "[features]\ncodex_hooks = false\n"
     );
     let hooks: JsonValue = serde_json::from_str(
-        &fs::read_to_string(repo_root.join(".codex").join("hooks.json")).expect("read hooks"),
+        &fs::read_to_string(repo_root.join(".aren").join("hooks.json")).expect("read hooks"),
     )
     .expect("parse hooks");
     assert_eq!(
@@ -1472,7 +1468,7 @@ async fn import_repo_mcp_uses_home_settings_toggles_when_repo_settings_missing()
     )
     .expect("write external agent project config");
 
-    let outcome = service_for_paths(external_agent_home, root.path().join(".codex"))
+    let outcome = service_for_paths(external_agent_home, root.path().join(".aren"))
         .import(vec![ExternalAgentConfigMigrationItem {
             item_type: ExternalAgentConfigMigrationItemType::McpServerConfig,
             description: String::new(),
@@ -1499,7 +1495,7 @@ async fn import_repo_mcp_uses_home_settings_toggles_when_repo_settings_missing()
         }]
     );
     let config: TomlValue = toml::from_str(
-        &fs::read_to_string(repo_root.join(".codex").join("config.toml")).expect("read config"),
+        &fs::read_to_string(repo_root.join(".aren").join("config.toml")).expect("read config"),
     )
     .expect("parse config");
     let expected: TomlValue = toml::from_str(
@@ -1549,7 +1545,7 @@ async fn import_repo_mcp_uses_local_settings_toggles_over_project_settings() {
     )
     .expect("write local settings");
 
-    service_for_paths(external_agent_home, root.path().join(".codex"))
+    service_for_paths(external_agent_home, root.path().join(".aren"))
         .import(vec![ExternalAgentConfigMigrationItem {
             item_type: ExternalAgentConfigMigrationItemType::McpServerConfig,
             description: String::new(),
@@ -1559,7 +1555,7 @@ async fn import_repo_mcp_uses_local_settings_toggles_over_project_settings() {
         .await;
 
     let config: TomlValue = toml::from_str(
-        &fs::read_to_string(repo_root.join(".codex").join("config.toml")).expect("read config"),
+        &fs::read_to_string(repo_root.join(".aren").join("config.toml")).expect("read config"),
     )
     .expect("parse config");
     let expected: TomlValue = toml::from_str(
@@ -1596,7 +1592,7 @@ async fn import_repo_mcp_ignores_invalid_home_settings_when_repo_settings_missin
     )
     .expect("write external agent project config");
 
-    service_for_paths(external_agent_home, root.path().join(".codex"))
+    service_for_paths(external_agent_home, root.path().join(".aren"))
         .import(vec![ExternalAgentConfigMigrationItem {
             item_type: ExternalAgentConfigMigrationItemType::McpServerConfig,
             description: String::new(),
@@ -1606,7 +1602,7 @@ async fn import_repo_mcp_ignores_invalid_home_settings_when_repo_settings_missin
         .await;
 
     let config: TomlValue = toml::from_str(
-        &fs::read_to_string(repo_root.join(".codex").join("config.toml")).expect("read config"),
+        &fs::read_to_string(repo_root.join(".aren").join("config.toml")).expect("read config"),
     )
     .expect("parse config");
     let expected: TomlValue = toml::from_str(
@@ -1636,7 +1632,7 @@ async fn import_repo_uses_non_empty_external_agent_agents_source() {
 
     service_for_paths(
         root.path().join(EXTERNAL_AGENT_DIR),
-        root.path().join(".codex"),
+        root.path().join(".aren"),
     )
     .import(vec![ExternalAgentConfigMigrationItem {
         item_type: ExternalAgentConfigMigrationItemType::AgentsMd,
@@ -1661,7 +1657,7 @@ async fn import_continues_after_failed_migration_item() {
 
     service_for_paths(
         root.path().join(EXTERNAL_AGENT_DIR),
-        root.path().join(".codex"),
+        root.path().join(".aren"),
     )
     .import(vec![
         ExternalAgentConfigMigrationItem {
@@ -1973,7 +1969,7 @@ async fn detect_home_plugins_uses_local_settings_over_project_settings() {
 async fn detect_repo_skips_plugins_that_are_already_configured_in_codex() {
     let root = TempDir::new().expect("create tempdir");
     let external_agent_home = root.path().join(EXTERNAL_AGENT_DIR);
-    let codex_home = root.path().join(".codex");
+    let codex_home = root.path().join(".aren");
     let repo_root = root.path().join("repo");
     fs::create_dir_all(repo_root.join(".git")).expect("create git dir");
     fs::create_dir_all(repo_root.join(EXTERNAL_AGENT_DIR)).expect("create repo external agent dir");
@@ -2037,7 +2033,7 @@ enabled = true
 async fn detect_repo_skips_plugins_that_are_disabled_in_codex() {
     let root = TempDir::new().expect("create tempdir");
     let external_agent_home = root.path().join(EXTERNAL_AGENT_DIR);
-    let codex_home = root.path().join(".codex");
+    let codex_home = root.path().join(".aren");
     let repo_root = root.path().join("repo");
     fs::create_dir_all(repo_root.join(".git")).expect("create git dir");
     fs::create_dir_all(repo_root.join(EXTERNAL_AGENT_DIR)).expect("create repo external agent dir");
@@ -2080,7 +2076,7 @@ enabled = false
 async fn detect_repo_skips_plugins_without_explicit_enabled_in_codex() {
     let root = TempDir::new().expect("create tempdir");
     let external_agent_home = root.path().join(EXTERNAL_AGENT_DIR);
-    let codex_home = root.path().join(".codex");
+    let codex_home = root.path().join(".aren");
     let repo_root = root.path().join("repo");
     fs::create_dir_all(repo_root.join(".git")).expect("create git dir");
     fs::create_dir_all(repo_root.join(EXTERNAL_AGENT_DIR)).expect("create repo external agent dir");
@@ -2135,11 +2131,11 @@ async fn import_plugins_requires_details() {
 async fn detect_repo_does_not_skip_plugins_only_configured_in_project_codex() {
     let root = TempDir::new().expect("create tempdir");
     let external_agent_home = root.path().join(EXTERNAL_AGENT_DIR);
-    let codex_home = root.path().join(".codex");
+    let codex_home = root.path().join(".aren");
     let repo_root = root.path().join("repo");
     fs::create_dir_all(repo_root.join(".git")).expect("create git dir");
     fs::create_dir_all(repo_root.join(EXTERNAL_AGENT_DIR)).expect("create repo external agent dir");
-    fs::create_dir_all(repo_root.join(".codex")).expect("create repo codex dir");
+    fs::create_dir_all(repo_root.join(".aren")).expect("create repo codex dir");
     fs::create_dir_all(&codex_home).expect("create codex home");
     fs::write(
         repo_root.join(EXTERNAL_AGENT_DIR).join("settings.json"),
@@ -2156,7 +2152,7 @@ async fn detect_repo_does_not_skip_plugins_only_configured_in_project_codex() {
     )
     .expect("write repo settings");
     fs::write(
-        repo_root.join(".codex").join("config.toml"),
+        repo_root.join(".aren").join("config.toml"),
         r#"
 [plugins."formatter@acme-tools"]
 enabled = true
@@ -2254,7 +2250,7 @@ async fn detect_home_skips_plugins_with_invalid_marketplace_source() {
 async fn detect_repo_filters_plugins_against_installed_marketplace() {
     let root = TempDir::new().expect("create tempdir");
     let external_agent_home = root.path().join(EXTERNAL_AGENT_DIR);
-    let codex_home = root.path().join(".codex");
+    let codex_home = root.path().join(".aren");
     let repo_root = root.path().join("repo");
     let marketplace_root = codex_home.join(".tmp").join("marketplaces").join("debug");
     fs::create_dir_all(repo_root.join(".git")).expect("create git dir");
@@ -2793,7 +2789,7 @@ async fn import_plugins_infers_external_official_marketplace_when_missing_from_s
 async fn detect_repo_supports_project_relative_external_agent_plugin_marketplace_path() {
     let root = TempDir::new().expect("create tempdir");
     let external_agent_home = root.path().join(EXTERNAL_AGENT_DIR);
-    let codex_home = root.path().join(".codex");
+    let codex_home = root.path().join(".aren");
     let repo_root = root.path().join("repo");
     let marketplace_root = repo_root.join("my-marketplace");
     let plugin_root = marketplace_root.join("plugins").join("cloudflare");
@@ -2875,7 +2871,7 @@ async fn detect_repo_supports_project_relative_external_agent_plugin_marketplace
 async fn import_plugins_supports_project_relative_external_agent_plugin_marketplace_path() {
     let root = TempDir::new().expect("create tempdir");
     let external_agent_home = root.path().join(EXTERNAL_AGENT_DIR);
-    let codex_home = root.path().join(".codex");
+    let codex_home = root.path().join(".aren");
     let repo_root = root.path().join("repo");
     let marketplace_root = repo_root.join("my-marketplace");
     let plugin_root = marketplace_root.join("plugins").join("cloudflare");

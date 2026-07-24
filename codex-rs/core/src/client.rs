@@ -108,6 +108,11 @@ use tracing::trace;
 use tracing::warn;
 
 const FORCE_FIRST_TOOL_CALL_METADATA_KEY: &str = "aren_force_first_tool_call";
+const INTERACTIVE_SEARCH_METADATA_KEY: &str = "aren_interactive_search";
+const INTERACTIVE_SEARCH_INITIAL_CHROME_TOOLS: [&str; 2] = [
+    "mcp__chrome_devtools__new_page",
+    "mcp__chrome_devtools__navigate_page",
+];
 
 use crate::attestation::AttestationContext;
 use crate::attestation::AttestationProvider;
@@ -122,6 +127,7 @@ use crate::context::oss_tool_routing;
 use crate::feedback_tags;
 use crate::responses_metadata::CodexResponsesMetadata;
 use crate::responses_metadata::subagent_header_value;
+use crate::tools::oss_request_tool_selection::McpToolSelectionMode;
 use crate::tools::oss_request_tool_selection::select_oss_request_tools;
 use crate::util::emit_feedback_auth_recovery_tags;
 use codex_feedback::FeedbackRequestTags;
@@ -187,21 +193,34 @@ fn tool_choice_for_request(
         .extra
         .get(FORCE_FIRST_TOOL_CALL_METADATA_KEY)
         .is_some_and(|value| value == "true");
-    let has_tool_output = prompt.input.last().is_some_and(|item| {
+    let interactive_search_requires_chrome = responses_metadata
+        .extra
+        .get(INTERACTIVE_SEARCH_METADATA_KEY)
+        .is_some_and(|value| value == "true")
+        && prompt
+            .tools
+            .iter()
+            .any(|tool| INTERACTIVE_SEARCH_INITIAL_CHROME_TOOLS.contains(&tool.name()))
+        && !last_input_is_tool_output(prompt);
+    if matches!(oss_tool_routing, OssToolRouting::Require(_))
+        || interactive_search_requires_chrome
+        || (force_first_tool_call && !prompt.tools.is_empty() && !last_input_is_tool_output(prompt))
+    {
+        "required"
+    } else {
+        "auto"
+    }
+}
+
+fn last_input_is_tool_output(prompt: &Prompt) -> bool {
+    prompt.input.last().is_some_and(|item| {
         matches!(
             item,
             ResponseItem::FunctionCallOutput { .. }
                 | ResponseItem::CustomToolCallOutput { .. }
                 | ResponseItem::ToolSearchOutput { .. }
         )
-    });
-    if matches!(oss_tool_routing, OssToolRouting::Require(_))
-        || (force_first_tool_call && !prompt.tools.is_empty() && !has_tool_output)
-    {
-        "required"
-    } else {
-        "auto"
-    }
+    })
 }
 
 fn reasoning_effort_for_request(effort: ReasoningEffortConfig) -> ReasoningEffortConfig {
@@ -881,24 +900,52 @@ impl ModelClient {
         if is_oss && let Some(current_date) = prompt.current_date.as_deref() {
             apply_oss_turn_reminder(&mut input, current_date);
         }
+        let interactive_search = responses_metadata
+            .extra
+            .get(INTERACTIVE_SEARCH_METADATA_KEY)
+            .is_some_and(|value| value == "true");
         let selected_oss_tools = (is_oss && matches!(oss_tool_routing, OssToolRouting::Default))
             .then(|| {
-                select_oss_request_tools(latest_user_request.as_deref(), prompt.tools.as_slice())
-            });
-        let request_tools = match oss_tool_routing {
-            OssToolRouting::Default => selected_oss_tools
-                .as_deref()
-                .unwrap_or(prompt.tools.as_slice()),
-            OssToolRouting::Require(name) => {
-                if let Some(tool) = prompt.tools.iter().find(|tool| tool.name() == name) {
-                    std::slice::from_ref(tool)
+                let mode = if interactive_search {
+                    McpToolSelectionMode::InteractiveSearch
                 } else {
-                    oss_tool_routing = OssToolRouting::Default;
-                    prompt.tools.as_slice()
+                    McpToolSelectionMode::Default
+                };
+                select_oss_request_tools(
+                    latest_user_request.as_deref(),
+                    prompt.tools.as_slice(),
+                    mode,
+                )
+            });
+        let initial_interactive_search_chrome_tool = (interactive_search
+            && !last_input_is_tool_output(prompt))
+        .then(|| {
+            INTERACTIVE_SEARCH_INITIAL_CHROME_TOOLS
+                .iter()
+                .find_map(|name| prompt.tools.iter().find(|tool| tool.name() == *name))
+                .cloned()
+        })
+        .flatten()
+        .map(|tool| vec![tool]);
+        let request_tools =
+            if let Some(chrome_tools) = initial_interactive_search_chrome_tool.as_deref() {
+                chrome_tools
+            } else {
+                match oss_tool_routing {
+                    OssToolRouting::Default => selected_oss_tools
+                        .as_deref()
+                        .unwrap_or(prompt.tools.as_slice()),
+                    OssToolRouting::Require(name) => {
+                        if let Some(tool) = prompt.tools.iter().find(|tool| tool.name() == name) {
+                            std::slice::from_ref(tool)
+                        } else {
+                            oss_tool_routing = OssToolRouting::Default;
+                            prompt.tools.as_slice()
+                        }
+                    }
+                    OssToolRouting::Suppress => &[],
                 }
-            }
-            OssToolRouting::Suppress => &[],
-        };
+            };
         let tools = create_tools_json_for_responses_api(request_tools)?;
         let (instructions, tools) = if model_info.use_responses_lite {
             let mut prefix = vec![ResponseItem::AdditionalTools {

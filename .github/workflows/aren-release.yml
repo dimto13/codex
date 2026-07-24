@@ -2,8 +2,6 @@ name: aren-release
 
 on:
   push:
-    branches:
-      - "**"
     tags:
       - "aren-v*"
   workflow_dispatch:
@@ -65,9 +63,25 @@ jobs:
           set -euo pipefail
           mkdir -p ../dist/package
           install -m 0755 target/release/codex ../dist/package/aren
+          install -m 0755 target/release/codex ../dist/aren-linux-x86_64
+
+          if [[ "${GITHUB_REF}" == refs/tags/aren-v* ]]; then
+            release_name="${GITHUB_REF_NAME}"
+          else
+            release_name="aren-manual-${GITHUB_SHA:0:12}"
+          fi
+          printf '%s\n' \
+            "release=${release_name}" \
+            "commit=${GITHUB_SHA}" \
+            "github_run=${GITHUB_RUN_ID}" \
+            "built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            "target=x86_64-unknown-linux-gnu" \
+            > ../dist/package/BUILD-INFO.txt
+          cp ../dist/package/BUILD-INFO.txt ../dist/BUILD-INFO.txt
+
           ../dist/package/aren --version
           ../dist/package/aren interactive-search --help >/dev/null
-          tar -C ../dist/package -czf "../dist/${AREN_ARCHIVE}" aren
+          tar -C ../dist/package -czf "../dist/${AREN_ARCHIVE}" aren BUILD-INFO.txt
           (cd ../dist && sha256sum "${AREN_ARCHIVE}" > "${AREN_ARCHIVE}.sha256")
 
       - name: Upload build artifact
@@ -77,42 +91,13 @@ jobs:
           path: |
             dist/${{ env.AREN_ARCHIVE }}
             dist/${{ env.AREN_ARCHIVE }}.sha256
+            dist/aren-linux-x86_64
+            dist/BUILD-INFO.txt
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 7
 
-  publish-edge:
-    name: Publish rolling Aren Edge release
-    needs: build-linux-x86_64
-    if: github.event_name == 'push' && github.ref == 'refs/heads/custom/interactive-search'
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-
-    steps:
-      - name: Download build artifact
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: aren-linux-x86_64
-          path: dist
-
-      - name: Replace rolling release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          gh release delete aren-edge --repo "${GITHUB_REPOSITORY}" --yes || true
-          gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/aren-edge" || true
-          gh release create aren-edge \
-            --repo "${GITHUB_REPOSITORY}" \
-            --target "${GITHUB_SHA}" \
-            --title "Aren Edge" \
-            --notes "Automatischer Entwicklungsbuild aus ${GITHUB_REF_NAME} (${GITHUB_SHA})." \
-            --prerelease \
-            "dist/${AREN_ARCHIVE}" \
-            "dist/${AREN_ARCHIVE}.sha256"
-
-  publish-tag:
-    name: Publish tagged Aren release
+  publish-release:
+    name: Publish Aren GitHub Release
     needs: build-linux-x86_64
     if: startsWith(github.ref, 'refs/tags/aren-v')
     runs-on: ubuntu-24.04
@@ -120,13 +105,27 @@ jobs:
       contents: write
 
     steps:
-      - name: Download build artifact
+      - name: Download verified build artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: aren-linux-x86_64
           path: dist
 
-      - name: Publish release
+      - name: Verify release payload
+        run: |
+          set -euo pipefail
+          (
+            cd dist
+            sha256sum --check "${AREN_ARCHIVE}.sha256"
+          )
+          mkdir -p dist/verify
+          tar -C dist/verify -xzf "dist/${AREN_ARCHIVE}"
+          dist/verify/aren --version
+          dist/verify/aren interactive-search --help >/dev/null
+          grep -Fx "release=${GITHUB_REF_NAME}" dist/verify/BUILD-INFO.txt
+          grep -Fx "commit=${GITHUB_SHA}" dist/verify/BUILD-INFO.txt
+
+      - name: Publish immutable release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -137,4 +136,6 @@ jobs:
             --title "Aren ${GITHUB_REF_NAME#aren-v}" \
             --generate-notes \
             "dist/${AREN_ARCHIVE}" \
-            "dist/${AREN_ARCHIVE}.sha256"
+            "dist/${AREN_ARCHIVE}.sha256" \
+            "dist/aren-linux-x86_64" \
+            "dist/BUILD-INFO.txt"

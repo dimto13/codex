@@ -19,7 +19,7 @@ use super::try_lock_file;
 #[tokio::test]
 async fn locked_empty_pid_file_is_treated_as_active_reservation() {
     let temp_dir = TempDir::new().expect("temp dir");
-    let pid_file = temp_dir.path().join("app-server.pid");
+    let pid_file = temp_dir.path().join("aren.pid");
     tokio::fs::write(&pid_file, "")
         .await
         .expect("write pid file");
@@ -47,7 +47,7 @@ async fn locked_empty_pid_file_is_treated_as_active_reservation() {
 #[tokio::test]
 async fn unlocked_empty_pid_file_is_treated_as_stale_reservation() {
     let temp_dir = TempDir::new().expect("temp dir");
-    let pid_file = temp_dir.path().join("app-server.pid");
+    let pid_file = temp_dir.path().join("aren.pid");
     tokio::fs::write(&pid_file, "")
         .await
         .expect("write pid file");
@@ -67,7 +67,7 @@ async fn unlocked_empty_pid_file_is_treated_as_stale_reservation() {
 #[tokio::test]
 async fn stop_waits_for_live_reservation_to_resolve() {
     let temp_dir = TempDir::new().expect("temp dir");
-    let pid_file = temp_dir.path().join("app-server.pid");
+    let pid_file = temp_dir.path().join("aren.pid");
     tokio::fs::write(&pid_file, "")
         .await
         .expect("write pid file");
@@ -99,7 +99,7 @@ async fn stop_waits_for_live_reservation_to_resolve() {
 #[tokio::test]
 async fn start_retries_stale_empty_pid_file_under_its_own_lock() {
     let temp_dir = TempDir::new().expect("temp dir");
-    let pid_file = temp_dir.path().join("app-server.pid");
+    let pid_file = temp_dir.path().join("aren.pid");
     tokio::fs::write(&pid_file, "")
         .await
         .expect("write pid file");
@@ -119,7 +119,7 @@ async fn start_retries_stale_empty_pid_file_under_its_own_lock() {
 #[tokio::test]
 async fn stale_record_cleanup_preserves_replacement_record() {
     let temp_dir = TempDir::new().expect("temp dir");
-    let pid_file = temp_dir.path().join("app-server.pid");
+    let pid_file = temp_dir.path().join("aren.pid");
     let backend = PidBackend::new(
         temp_dir.path().join("codex"),
         pid_file.clone(),
@@ -152,7 +152,7 @@ async fn stale_record_cleanup_preserves_replacement_record() {
 #[tokio::test]
 async fn stop_reaps_untracked_app_server_child() {
     let temp_dir = TempDir::new().expect("temp dir");
-    let pid_file = temp_dir.path().join("app-server.pid");
+    let pid_file = temp_dir.path().join("aren.pid");
     let mut child = std::process::Command::new("sleep")
         .arg("5")
         .stdin(Stdio::null())
@@ -207,7 +207,7 @@ fn update_loop_uses_hidden_app_server_subcommand() {
 fn app_server_remote_control_uses_runtime_flag() {
     let backend = PidBackend::new(
         "codex".into(),
-        "app-server.pid".into(),
+        "aren.pid".into(),
         /*remote_control_enabled*/ true,
     );
 
@@ -221,7 +221,7 @@ fn app_server_remote_control_uses_runtime_flag() {
 fn app_server_disabled_remote_control_uses_compatible_args_and_runtime_env() {
     let backend = PidBackend::new(
         "codex".into(),
-        "app-server.pid".into(),
+        "aren.pid".into(),
         /*remote_control_enabled*/ false,
     );
 
@@ -238,7 +238,7 @@ fn app_server_disabled_remote_control_uses_compatible_args_and_runtime_env() {
 #[tokio::test]
 async fn read_stderr_log_tail_returns_recent_complete_lines() {
     let temp_dir = TempDir::new().expect("temp dir");
-    let pid_file = temp_dir.path().join("app-server.pid");
+    let pid_file = temp_dir.path().join("aren.pid");
     let log_file = stderr_log_file_for_pid_file(&pid_file);
     let contents = format!("{}\nrecent error\nusage", "x".repeat(4100));
     tokio::fs::write(&log_file, contents)

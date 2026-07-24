@@ -75,7 +75,7 @@ async fn first_turn_after_external_login_waits_for_recommended_plugins() -> Resu
     let mut app_server = TestAppServer::builder()
         .with_codex_home(codex_home.path())
         .without_managed_config()
-        .with_env_overrides(&[("CODEX_SQLITE_HOME", Some(sqlite_home.as_ref()))])
+        .with_env_overrides(&[("AREN_SQLITE_HOME", Some(sqlite_home.as_ref()))])
         .build()
         .await?;
     timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;

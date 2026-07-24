@@ -96,7 +96,7 @@ fn runtime_paths(local_app_data: Option<PathBuf>, user_profile: Option<PathBuf>)
     }
     // The managed primary runtime is installed outside the LocalAppData runtime roots.
     if let Some(user_profile) = user_profile {
-        runtime_paths.push(user_profile.join(".cache").join("codex-runtimes"));
+        runtime_paths.push(user_profile.join(".cache").join("aren-runtimes"));
     }
 
     runtime_paths

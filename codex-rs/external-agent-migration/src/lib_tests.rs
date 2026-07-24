@@ -42,7 +42,7 @@ fn migrated_hook_command(script_name: &str) -> String {
 }
 
 fn migrated_quoted_hook_command(script_name: &str) -> String {
-    let hook_path = Path::new("/repo/.codex")
+    let hook_path = Path::new("/repo/.aren")
         .join(EXTERNAL_AGENT_MIGRATED_HOOKS_SUBDIR)
         .join(script_name);
     format!(
@@ -528,12 +528,12 @@ Review carefully."""
 
 #[test]
 fn subagent_target_preserves_dotted_file_stem() {
-    let target_agents = Path::new("/repo/.codex/agents");
+    let target_agents = Path::new("/repo/.aren/agents");
     let source_file = source_path("agents/security.audit.md");
 
     assert_eq!(
         subagent_target_file(&source_file, target_agents),
-        Some(PathBuf::from("/repo/.codex/agents/security.audit.toml"))
+        Some(PathBuf::from("/repo/.aren/agents/security.audit.toml"))
     );
 }
 
@@ -605,7 +605,7 @@ fn hook_migration_ignores_unsupported_handlers() {
     append_convertible_hook_groups_cla(
         &settings,
         &mut migration,
-        Some(Path::new("/repo/.codex")),
+        Some(Path::new("/repo/.aren")),
         TEST_REWRITE_PROFILE,
     );
 
@@ -726,17 +726,17 @@ fn hook_command_paths_rewrite_to_target_hook_dir() {
     assert_eq!(
         rewrite_hook_command_cla(
             &source_hook_command_with_project_dir("check.py"),
-            Some(Path::new("/repo/.codex")),
+            Some(Path::new("/repo/.aren")),
         ),
         migrated_hook_command("check.py")
     );
     assert_eq!(
         rewrite_hook_command_cla(
             &format!("\"${project_dir_env_var}\"/{source_hooks_path}/check-style.sh"),
-            Some(Path::new("/repo/.codex")),
+            Some(Path::new("/repo/.aren")),
         ),
         shell_single_quote(
-            Path::new("/repo/.codex")
+            Path::new("/repo/.aren")
                 .join(EXTERNAL_AGENT_MIGRATED_HOOKS_SUBDIR)
                 .join("check-style.sh")
                 .to_string_lossy()
@@ -746,35 +746,35 @@ fn hook_command_paths_rewrite_to_target_hook_dir() {
     assert_eq!(
         rewrite_hook_command_cla(
             &source_hook_command("check.py"),
-            Some(Path::new("/repo/.codex")),
+            Some(Path::new("/repo/.aren")),
         ),
         migrated_hook_command("check.py")
     );
     assert_eq!(
         rewrite_hook_command_cla(
             &format!("python3 ./{source_hooks_path}/check.py"),
-            Some(Path::new("/repo/.codex")),
+            Some(Path::new("/repo/.aren")),
         ),
         migrated_hook_command("check.py")
     );
     assert_eq!(
         rewrite_hook_command_cla(
             &format!("python3 '${{{project_dir_env_var}}}/{source_hooks_path}/check.py'"),
-            Some(Path::new("/repo/.codex")),
+            Some(Path::new("/repo/.aren")),
         ),
         migrated_quoted_hook_command("check.py")
     );
     assert_eq!(
         rewrite_hook_command_cla(
             &format!("python3 \"${{{project_dir_env_var}}}/{source_hooks_path}/check.py\""),
-            Some(Path::new("/repo/.codex")),
+            Some(Path::new("/repo/.aren")),
         ),
         migrated_quoted_hook_command("check.py")
     );
     assert_eq!(
         rewrite_hook_command_cla(
             &format!("bash -lc \"python3 {source_hooks_path}/check.py\""),
-            Some(Path::new("/repo/.codex")),
+            Some(Path::new("/repo/.aren")),
         ),
         format!("bash -lc \"python3 {source_hooks_path}/check.py\"")
     );
@@ -783,35 +783,35 @@ fn hook_command_paths_rewrite_to_target_hook_dir() {
             &format!(
                 "HOOK=${{{project_dir_env_var}}}/{source_hooks_path}/check.py python3 \"$HOOK\""
             ),
-            Some(Path::new("/repo/.codex")),
+            Some(Path::new("/repo/.aren")),
         ),
         format!("HOOK=${{{project_dir_env_var}}}/{source_hooks_path}/check.py python3 \"$HOOK\"")
     );
     assert_eq!(
         rewrite_hook_command_cla(
             &format!("python3 {source_hooks_path}/${{SCRIPT}}.py"),
-            Some(Path::new("/repo/.codex")),
+            Some(Path::new("/repo/.aren")),
         ),
         format!("python3 {source_hooks_path}/${{SCRIPT}}.py")
     );
     assert_eq!(
         rewrite_hook_command_cla(
             &format!("python3 {source_hooks_path}/{{lint,fmt}}.sh"),
-            Some(Path::new("/repo/.codex")),
+            Some(Path::new("/repo/.aren")),
         ),
         format!("python3 {source_hooks_path}/{{lint,fmt}}.sh")
     );
     assert_eq!(
         rewrite_hook_command_cla(
             &format!("python3 {source_hooks_path}/my\\ script.py"),
-            Some(Path::new("/repo/.codex")),
+            Some(Path::new("/repo/.aren")),
         ),
         format!("python3 {source_hooks_path}/my\\ script.py")
     );
     assert_eq!(
         rewrite_hook_command_cla(
             &format!("python3 .{SOURCE_EXTERNAL_AGENT_NAME}\\hooks\\check.py"),
-            Some(Path::new("/repo/.codex")),
+            Some(Path::new("/repo/.aren")),
         ),
         format!("python3 .{}\\hooks\\check.py", SOURCE_EXTERNAL_AGENT_NAME)
     );
@@ -822,7 +822,7 @@ fn hook_command_paths_rewrite_to_target_hook_dir() {
                 project_dir_env_var,
                 external_agent_config_dir()
             ),
-            Some(Path::new("/repo/.codex")),
+            Some(Path::new("/repo/.aren")),
         ),
         format!(
             "python3 \"%{}%\\{}\\hooks\\check.py\"",
@@ -833,19 +833,19 @@ fn hook_command_paths_rewrite_to_target_hook_dir() {
     assert_eq!(
         rewrite_hook_command_cla(
             &format!("python3 '${{{project_dir_env_var}}}/{source_hooks_path}/my script.py'"),
-            Some(Path::new("/repo/.codex")),
+            Some(Path::new("/repo/.aren")),
         ),
         migrated_quoted_hook_command("my script.py")
     );
     assert_eq!(
         rewrite_hook_command_cla(
             &format!("/repo/{source_hooks_path}/check.py 2>/dev/null || true"),
-            Some(Path::new("/repo/.codex")),
+            Some(Path::new("/repo/.aren")),
         ),
         format!(
             "{} 2>/dev/null || true",
             shell_single_quote(
-                Path::new("/repo/.codex")
+                Path::new("/repo/.aren")
                     .join(EXTERNAL_AGENT_MIGRATED_HOOKS_SUBDIR)
                     .join("check.py")
                     .to_string_lossy()
@@ -855,7 +855,7 @@ fn hook_command_paths_rewrite_to_target_hook_dir() {
     );
     let plugin_script_command = format!("${{{plugin_root_env_var}}}/scripts/format.sh");
     assert_eq!(
-        rewrite_hook_command_cla(&plugin_script_command, Some(Path::new("/repo/.codex")),),
+        rewrite_hook_command_cla(&plugin_script_command, Some(Path::new("/repo/.aren")),),
         plugin_script_command
     );
 }
@@ -865,7 +865,7 @@ fn hook_script_copy_keeps_existing_target_scripts() {
     let root = tempfile::TempDir::new().expect("tempdir");
     let source_external_agent_dir = root.path().join(external_agent_config_dir());
     let source_hooks = source_external_agent_dir.join(EXTERNAL_AGENT_HOOKS_SUBDIR);
-    let target_config_dir = root.path().join(".codex");
+    let target_config_dir = root.path().join(".aren");
     let target_hooks = target_config_dir.join(EXTERNAL_AGENT_MIGRATED_HOOKS_SUBDIR);
     fs::create_dir_all(&source_hooks).expect("create source hooks");
     fs::create_dir_all(&target_hooks).expect("create target hooks");

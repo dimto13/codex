@@ -1,4 +1,4 @@
-n# WARNING: CI/CD DEACTIVATION FOR JENKINS INTEGRATION START
+# WARNING: CI/CD DEACTIVATION FOR JENKINS INTEGRATION START
 # This workflow is temporarily disabled for classical GitHub CD/CI deployment.
 # All release and build steps herein must be migrated to Jenkins.
 # ci-cd-disabled: true

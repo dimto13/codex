@@ -23,7 +23,7 @@ fn marketplace_list_row(marketplace_name: &str, root: &Path) -> String {
 
 fn codex_command(codex_home: &Path) -> Result<assert_cmd::Command> {
     let mut cmd = assert_cmd::Command::new(codex_utils_cargo_bin::cargo_bin("codex")?);
-    cmd.env("CODEX_HOME", codex_home);
+    cmd.env("AREN_HOME", codex_home);
     cmd.env("HOME", codex_home);
     Ok(cmd)
 }
@@ -206,7 +206,7 @@ fn setup_local_marketplace_with_implicit_system_roots() -> Result<(TempDir, Temp
     let runtime_root = cache_home
         .path()
         .join(".cache")
-        .join("codex-runtimes")
+        .join("aren-runtimes")
         .join("codex-primary-runtime")
         .join("plugins")
         .join("openai-primary-runtime");

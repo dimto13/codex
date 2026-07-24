@@ -16,8 +16,8 @@ use super::DoctorCheck;
 const MAX_PROBE_ERROR_CHARS: usize = 120;
 const STATE_DIR_NAME: &str = "app-server-daemon";
 const SETTINGS_FILE_NAME: &str = "settings.json";
-const PID_FILE_NAME: &str = "app-server.pid";
-const UPDATE_PID_FILE_NAME: &str = "app-server-updater.pid";
+const PID_FILE_NAME: &str = "aren.pid";
+const UPDATE_PID_FILE_NAME: &str = "aren-updater.pid";
 
 /// Builds the app-server status row from existing daemon state.
 ///

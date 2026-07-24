@@ -55,6 +55,7 @@ use time::format_description::well_known::Rfc3339;
 use tokio::time as tokio_time;
 
 const FORCE_FIRST_TOOL_CALL_METADATA_KEY: &str = "aren_force_first_tool_call";
+const INTERACTIVE_SEARCH_METADATA_KEY: &str = "aren_interactive_search";
 
 pub(crate) async fn run_interactive_search(
     mut cli: TuiCli,
@@ -227,7 +228,6 @@ pub(crate) async fn run_interactive_search(
         Arc::clone(&thread),
         build_user_inputs(prompt, cli.images.clone()),
         interactive_search_context(cli.oss),
-        cli.oss,
         json_output,
         timeout_secs.map(Duration::from_secs),
     )
@@ -344,7 +344,6 @@ async fn run_headless_session(
     thread: Arc<CodexThread>,
     items: Vec<UserInput>,
     additional_context: BTreeMap<String, AdditionalContextEntry>,
-    force_first_tool_call: bool,
     json_output: bool,
     timeout: Option<Duration>,
 ) -> anyhow::Result<String> {
@@ -352,12 +351,16 @@ async fn run_headless_session(
         .submit(Op::UserInput {
             items,
             final_output_json_schema: None,
-            responsesapi_client_metadata: force_first_tool_call.then(|| {
-                HashMap::from([(
+            responsesapi_client_metadata: Some(HashMap::from([
+                (
+                    INTERACTIVE_SEARCH_METADATA_KEY.to_string(),
+                    "true".to_string(),
+                ),
+                (
                     FORCE_FIRST_TOOL_CALL_METADATA_KEY.to_string(),
                     "true".to_string(),
-                )])
-            }),
+                ),
+            ])),
             additional_context,
             thread_settings: ThreadSettingsOverrides::default(),
         })
@@ -476,14 +479,14 @@ fn build_user_inputs(prompt: String, images: Vec<PathBuf>) -> Vec<UserInput> {
 }
 
 fn interactive_search_context(oss: bool) -> BTreeMap<String, AdditionalContextEntry> {
-    if !oss {
-        return BTreeMap::new();
-    }
-
     BTreeMap::from([(
         "interactive_search_tools".to_string(),
         AdditionalContextEntry {
-            value: "Use available tools for current or time-sensitive information. Local Executor MCP tools have names beginning with `mcp__executor__`; for current weather, call `mcp__executor__get_current_weather` when it is available. Do not claim that live access is unavailable before checking for and attempting an appropriate tool.".to_string(),
+            value: if oss {
+                "For every Internet research request in this interactive-search turn, you must use the connected Chrome DevTools MCP whenever its `mcp__chrome_devtools__*` tools are available. Use `mcp__chrome_devtools__new_page` or `mcp__chrome_devtools__navigate_page` at least once to open a relevant page and inspect its contents with `mcp__chrome_devtools__take_snapshot`. Built-in search and Executor web tools may be used to discover candidate URLs, but do not answer from those results alone; verify important claims in Chrome. Local Executor MCP tools have names beginning with `mcp__executor__`; for current weather, call `mcp__executor__get_current_weather` when it is available. Do not claim that live access is unavailable before checking for and attempting an appropriate tool.".to_string()
+            } else {
+                "For every Internet research request in this interactive-search turn, you must use the connected Chrome DevTools MCP whenever its `mcp__chrome_devtools__*` tools are available. Use `mcp__chrome_devtools__new_page` or `mcp__chrome_devtools__navigate_page` at least once to open a relevant page and inspect its contents with `mcp__chrome_devtools__take_snapshot`. Built-in search may be used to discover candidate URLs, but do not answer from those results alone; verify important claims in Chrome. Do not claim that live access is unavailable before checking for and attempting an appropriate tool.".to_string()
+            },
             kind: AdditionalContextKind::Application,
         },
     )])

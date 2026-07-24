@@ -10,6 +10,14 @@ If you want Codex in your code editor (VS Code, Cursor, Windsurf), <a href="http
 ---
 # Meine Anforderungen
 
+- [x] Aren verwendet vollständig getrennte Zustands- und Konfigurationspfade:
+  1. `utils/home-dir`: Standardpfad `~/.aren`, `AREN_HOME` und `AREN_SQLITE_HOME`.
+  2. `login/auth/storage`: Keyring-Dienste `Aren Auth` und `aren`.
+  3. `app-server-transport` / `app-server-daemon`: Socket `aren.sock` sowie
+     PID-Dateien `aren.pid` und `aren-updater.pid`.
+  4. Projektkonfiguration, Hooks, Regeln und Skills unter `.aren/`.
+  5. `core-plugins`: Cache-Pfad `aren-runtimes`.
+
 - [x] Standard-Modellauswahl: `gemma4:e4b` mit hohem Reasoning-Aufwand.
 - [x] Standard-Berechtigungen: voller Zugriff ohne Sandbox und Rückfragen.
 - [x] Ein einfacher Aufruf von `aren` aktiviert automatisch OSS, Ollama und die
@@ -17,6 +25,56 @@ If you want Codex in your code editor (VS Code, Cursor, Windsurf), <a href="http
 - [x] Allgemeine lokale Anfragen zu Dateien, Systemzustand und Git werden mit
   den vorhandenen Shell-Werkzeugen gelöst; große MCP-/App-Werkzeugkataloge
   werden pro Anfrage relevant gefiltert statt durch Einzelfall-Skripte ersetzt.
+
+## Vorläufiger Aren-Releaseprozess
+
+- GitHub Actions ist der primäre Release-Builder. Release-Kompilierung läuft
+  weder auf dem lokalen Entwicklungsrechner noch auf dem Jenkins-NAS.
+- Ein Tag im Format `aren-v*` baut mit begrenzter Cargo-Parallelität zunächst
+  Linux x86_64 und veröffentlicht Binary, Archiv, Build-Info und SHA-256 als
+  dauerhafte GitHub-Release-Dateien.
+- Normale Branch-Pushes lösen keinen Release aus. Manuelle Workflowläufe bauen
+  nur Testartefakte und veröffentlichen kein Release.
+- Windows ist als nächster Zieltyp vorgesehen und soll auf einem nativen
+  GitHub-hosted Windows Runner gebaut und geprüft werden.
+- Lokal erfolgen ressourcenschonende, gezielte Crate-Tests. Umfangreiche
+  Testmatrizen werden in getrennte CI-Jobs aufgeteilt, statt ungebremst den
+  gesamten Workspace parallel zu linken.
+- Nach Veröffentlichung wird das Release lokal installiert und mit der
+  wiederholbaren Quick-/Full-Live-Qualitätssuite einschließlich Chrome MCP
+  geprüft.
+
+## OFFEN: Home-Rebrand `.codex` → `.aren` noch nicht wirksam
+
+> Vermerkt 2026-07-23. In einer späteren Session vollständig auflösen/migrieren.
+> Punkt 1 der Anforderungen oben ist erst im Quellcode umgesetzt, **nicht** in den
+> laufenden Binaries.
+
+**Ist-Zustand (empirisch verifiziert):**
+- Beide `codex`-Binaries lösen ihr Home real auf `~/.codex` auf (`codex doctor` →
+  `CODEX_HOME → ~/.codex`):
+  - PATH `/usr/local/bin/codex` → Symlink auf `@openai/codex` (node_modules, JS-Wrapper)
+  - lokaler Build `codex-rs/target/release/codex` (22.07.2026): Binary enthält 402× `.codex`
+    vs. 7× `.aren`, Fehlertext noch „CODEX_HOME points to".
+- `AREN_HOME` ist **nicht** gesetzt.
+- Aktives Config-Home = `~/.codex/` (config.toml, auth.json, Trust-Levels,
+  `[mcp_servers.*]` inkl. `executor` und `chrome-devtools`).
+- `~/.aren/` existiert, aber nur teilbefüllt: `mcp-oauth-locks/`, `proxy/`, `tmp/` —
+  **keine** config.toml, **keine** auth.json.
+
+**Ursache:** Quellcode ist schon rebranded (`codex-rs/utils/home-dir/src/lib.rs`:
+`find_codex_home()` defaultet auf `~/.aren`, Override `AREN_HOME`), aber die
+installierten/gebauten Binaries stammen noch aus dem `.codex`-Stand. Einzelne
+neuere Subsysteme (MCP-OAuth-Locks, Proxy, Temp) schreiben bereits nach `~/.aren`
+→ daher der halb-gefüllte Ordner.
+
+**Zu tun (später):**
+1. Richtung festlegen: konsequent auf `.aren` migrieren **oder** Rebrand im Code zurückdrehen.
+2. Bei Migration: `~/.codex/*` (config.toml, auth.json, Trust-Levels, MCP-Server)
+   nach `~/.aren` übernehmen; übergangsweise `export AREN_HOME=$HOME/.codex`.
+3. Binaries aus aktuellem Source neu bauen/installieren, damit PATH-`codex` und
+   lokaler Build dasselbe Home nutzen.
+4. Klären, ob PATH-`codex` (openai/codex node_modules) durch den aren-Build ersetzt wird.
 
 ---
 ## Quickstart

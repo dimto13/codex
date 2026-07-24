@@ -50,7 +50,7 @@ pub use websocket::start_websocket_acceptor;
 const OVERLOADED_ERROR_CODE: i64 = -32001;
 
 const APP_SERVER_CONTROL_SOCKET_DIR_NAME: &str = "app-server-control";
-const APP_SERVER_CONTROL_SOCKET_FILE_NAME: &str = "app-server-control.sock";
+const APP_SERVER_CONTROL_SOCKET_FILE_NAME: &str = "aren.sock";
 const APP_SERVER_STARTUP_LOCK_FILE_NAME: &str = "app-server-startup.lock";
 
 pub fn app_server_control_socket_path(codex_home: &Path) -> std::io::Result<AbsolutePathBuf> {
@@ -121,7 +121,7 @@ impl AppServerTransport {
                 let codex_home = find_codex_home().map_err(|err| {
                     AppServerTransportParseError::InvalidUnixSocketPath {
                         listen_url: listen_url.to_string(),
-                        message: format!("failed to resolve CODEX_HOME: {err}"),
+                        message: format!("failed to resolve AREN_HOME: {err}"),
                     }
                 })?;
                 app_server_control_socket_path(&codex_home).map_err(|err| {

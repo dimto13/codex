@@ -509,9 +509,9 @@ async fn sandbox_blocks_git_and_codex_writes_inside_writable_root() {
 
     let tmpdir = tempfile::tempdir().expect("tempdir");
     let dot_git = tmpdir.path().join(".git");
-    let dot_codex = tmpdir.path().join(".codex");
+    let dot_codex = tmpdir.path().join(".aren");
     std::fs::create_dir_all(&dot_git).expect("create .git");
-    std::fs::create_dir_all(&dot_codex).expect("create .codex");
+    std::fs::create_dir_all(&dot_codex).expect("create .aren");
 
     let git_target = dot_git.join("config");
     let codex_target = dot_codex.join("config.toml");
@@ -545,7 +545,7 @@ async fn sandbox_blocks_git_and_codex_writes_inside_writable_root() {
             /*network_access*/ true,
         )
         .await,
-        ".codex write should be denied under bubblewrap",
+        ".aren write should be denied under bubblewrap",
     );
     assert_ne!(git_output.exit_code, 0);
     assert_ne!(codex_output.exit_code, 0);
@@ -564,8 +564,8 @@ async fn sandbox_blocks_codex_symlink_replacement_attack() {
     let decoy = tmpdir.path().join("decoy-codex");
     std::fs::create_dir_all(&decoy).expect("create decoy dir");
 
-    let dot_codex = tmpdir.path().join(".codex");
-    symlink(&decoy, &dot_codex).expect("create .codex symlink");
+    let dot_codex = tmpdir.path().join(".aren");
+    symlink(&decoy, &dot_codex).expect("create .aren symlink");
 
     let codex_target = dot_codex.join("config.toml");
 
@@ -582,7 +582,7 @@ async fn sandbox_blocks_codex_symlink_replacement_attack() {
             /*network_access*/ true,
         )
         .await,
-        ".codex symlink replacement should be denied",
+        ".aren symlink replacement should be denied",
     );
     assert_ne!(codex_output.exit_code, 0);
 }
@@ -600,8 +600,8 @@ async fn sandbox_reports_codex_symlink_build_failure_without_panicking() {
     let decoy = tmpdir.path().join("decoy-codex");
     std::fs::create_dir_all(&decoy).expect("create decoy dir");
 
-    let dot_codex = tmpdir.path().join(".codex");
-    symlink(&decoy, &dot_codex).expect("create .codex symlink");
+    let dot_codex = tmpdir.path().join(".aren");
+    symlink(&decoy, &dot_codex).expect("create .aren symlink");
 
     let output = match run_cmd_result_with_writable_roots(
         &["bash", "-lc", "true"],
@@ -613,7 +613,7 @@ async fn sandbox_reports_codex_symlink_build_failure_without_panicking() {
     .await
     {
         Err(CodexErr::Sandbox(SandboxErr::Denied { output, .. })) => *output,
-        result => panic!(".codex symlink build failure should deny: {result:?}"),
+        result => panic!(".aren symlink build failure should deny: {result:?}"),
     };
 
     assert_eq!(output.exit_code, 1);
@@ -721,7 +721,7 @@ fi
 
     let mkdir_codex_output = expect_denied(
         run_cmd_result_with_cwd_and_writable_roots(
-            &["mkdir", ".codex"],
+            &["mkdir", ".aren"],
             &subdir,
             std::slice::from_ref(&subdir),
             LONG_TIMEOUT_MS,
@@ -729,10 +729,10 @@ fi
             /*network_access*/ true,
         )
         .await,
-        "child .codex directory creation should be denied",
+        "child .aren directory creation should be denied",
     );
     assert_ne!(mkdir_codex_output.exit_code, 0);
-    assert!(!subdir.join(".codex").exists());
+    assert!(!subdir.join(".aren").exists());
 
     let script = format!(
         r#"set -e
@@ -759,7 +759,7 @@ printf '%s\n' '{{"message":"ok"}}' | python3 jsonl_viewer.py | grep -q ok
 
     assert!(subdir.join("jsonl_viewer.py").is_file());
     assert!(!subdir.join(".git").exists());
-    assert!(!subdir.join(".codex").exists());
+    assert!(!subdir.join(".aren").exists());
     assert!(!subdir.join(".agents").exists());
 }
 

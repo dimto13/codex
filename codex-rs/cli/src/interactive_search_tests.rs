@@ -29,12 +29,25 @@ fn oss_interactive_search_adds_live_tool_guidance() {
         BTreeMap::from([(
             "interactive_search_tools".to_string(),
             AdditionalContextEntry {
-                value: "Use available tools for current or time-sensitive information. Local Executor MCP tools have names beginning with `mcp__executor__`; for current weather, call `mcp__executor__get_current_weather` when it is available. Do not claim that live access is unavailable before checking for and attempting an appropriate tool.".to_string(),
+                value: "For every Internet research request in this interactive-search turn, you must use the connected Chrome DevTools MCP whenever its `mcp__chrome_devtools__*` tools are available. Use `mcp__chrome_devtools__new_page` or `mcp__chrome_devtools__navigate_page` at least once to open a relevant page and inspect its contents with `mcp__chrome_devtools__take_snapshot`. Built-in search and Executor web tools may be used to discover candidate URLs, but do not answer from those results alone; verify important claims in Chrome. Local Executor MCP tools have names beginning with `mcp__executor__`; for current weather, call `mcp__executor__get_current_weather` when it is available. Do not claim that live access is unavailable before checking for and attempting an appropriate tool.".to_string(),
                 kind: AdditionalContextKind::Application,
             },
         )])
     );
-    assert_eq!(interactive_search_context(false), BTreeMap::new());
+}
+
+#[test]
+fn hosted_interactive_search_adds_chrome_guidance() {
+    assert_eq!(
+        interactive_search_context(false),
+        BTreeMap::from([(
+            "interactive_search_tools".to_string(),
+            AdditionalContextEntry {
+                value: "For every Internet research request in this interactive-search turn, you must use the connected Chrome DevTools MCP whenever its `mcp__chrome_devtools__*` tools are available. Use `mcp__chrome_devtools__new_page` or `mcp__chrome_devtools__navigate_page` at least once to open a relevant page and inspect its contents with `mcp__chrome_devtools__take_snapshot`. Built-in search may be used to discover candidate URLs, but do not answer from those results alone; verify important claims in Chrome. Do not claim that live access is unavailable before checking for and attempting an appropriate tool.".to_string(),
+                kind: AdditionalContextKind::Application,
+            },
+        )])
+    );
 }
 
 #[test]

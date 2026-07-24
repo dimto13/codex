@@ -455,7 +455,7 @@ type HostSandboxArgs = UnsupportedSandboxArgs;
 #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
 #[derive(Debug, Parser)]
 struct UnsupportedSandboxArgs {
-    /// Layer $CODEX_HOME/<name>.config.toml on top of the base user config.
+    /// Layer $AREN_HOME/<name>.config.toml on top of the base user config.
     #[arg(long = "profile", short = 'p')]
     pub config_profile: Option<ProfileV2Name>,
 
@@ -3823,9 +3823,9 @@ mod tests {
 
     #[test]
     fn remote_flag_parses_for_interactive_root() {
-        let cli = MultitoolCli::try_parse_from(["codex", "--remote", "unix://codex.sock"])
-            .expect("parse");
-        assert_eq!(cli.remote.remote.as_deref(), Some("unix://codex.sock"));
+        let cli =
+            MultitoolCli::try_parse_from(["codex", "--remote", "unix://aren.sock"]).expect("parse");
+        assert_eq!(cli.remote.remote.as_deref(), Some("unix://aren.sock"));
     }
 
     #[test]
@@ -3846,15 +3846,14 @@ mod tests {
 
     #[test]
     fn remote_flag_parses_for_resume_subcommand() {
-        let cli =
-            MultitoolCli::try_parse_from(["codex", "resume", "--remote", "unix://codex.sock"])
-                .expect("parse");
+        let cli = MultitoolCli::try_parse_from(["codex", "resume", "--remote", "unix://aren.sock"])
+            .expect("parse");
         let Subcommand::Resume(ResumeCommand { remote, .. }) =
             cli.subcommand.expect("resume present")
         else {
             panic!("expected resume subcommand");
         };
-        assert_eq!(remote.remote.as_deref(), Some("unix://codex.sock"));
+        assert_eq!(remote.remote.as_deref(), Some("unix://aren.sock"));
     }
 
     #[test]
@@ -3985,12 +3984,12 @@ mod tests {
     #[test]
     fn app_server_listen_unix_socket_path_parses() {
         let app_server = app_server_from_args(
-            ["codex", "app-server", "--listen", "unix:///tmp/codex.sock"].as_ref(),
+            ["codex", "app-server", "--listen", "unix:///tmp/aren.sock"].as_ref(),
         );
         assert_eq!(
             app_server.listen,
             codex_app_server::AppServerTransport::UnixSocket {
-                socket_path: AbsolutePathBuf::from_absolute_path("/tmp/codex.sock")
+                socket_path: AbsolutePathBuf::from_absolute_path("/tmp/aren.sock")
                     .expect("absolute path should parse")
             }
         );
@@ -4087,14 +4086,14 @@ mod tests {
     #[test]
     fn app_server_proxy_sock_path_parses() {
         let app_server =
-            app_server_from_args(["codex", "app-server", "proxy", "--sock", "codex.sock"].as_ref());
+            app_server_from_args(["codex", "app-server", "proxy", "--sock", "aren.sock"].as_ref());
         let Some(AppServerSubcommand::Proxy(proxy)) = app_server.subcommand else {
             panic!("expected proxy subcommand");
         };
         assert_eq!(
             proxy.socket_path,
             Some(
-                AbsolutePathBuf::relative_to_current_dir("codex.sock")
+                AbsolutePathBuf::relative_to_current_dir("aren.sock")
                     .expect("relative path should resolve")
             )
         );

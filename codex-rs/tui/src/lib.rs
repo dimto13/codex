@@ -348,7 +348,7 @@ fn websocket_url_supports_auth_token(parsed: &Url) -> bool {
 pub fn resolve_remote_addr(addr: &str) -> color_eyre::Result<RemoteAppServerEndpoint> {
     if let Some(socket_path) = addr.strip_prefix("unix://") {
         let socket_path = if socket_path.is_empty() {
-            let codex_home = find_codex_home().wrap_err("failed to resolve CODEX_HOME")?;
+            let codex_home = find_codex_home().wrap_err("failed to resolve AREN_HOME")?;
             codex_app_server_client::app_server_control_socket_path(&codex_home)
                 .map_err(color_eyre::Report::new)?
         } else {
@@ -2173,7 +2173,7 @@ mod tests {
 
     #[test]
     fn resolve_remote_addr_accepts_default_socket() -> color_eyre::Result<()> {
-        let codex_home = find_codex_home().wrap_err("failed to resolve CODEX_HOME")?;
+        let codex_home = find_codex_home().wrap_err("failed to resolve AREN_HOME")?;
         assert_eq!(
             resolve_remote_addr("unix://")?,
             RemoteAppServerEndpoint::UnixSocket {
@@ -2186,9 +2186,9 @@ mod tests {
     #[test]
     fn resolve_remote_addr_accepts_relative_socket_path() -> color_eyre::Result<()> {
         assert_eq!(
-            resolve_remote_addr("unix://codex.sock")?,
+            resolve_remote_addr("unix://aren.sock")?,
             RemoteAppServerEndpoint::UnixSocket {
-                socket_path: AbsolutePathBuf::relative_to_current_dir("codex.sock")?,
+                socket_path: AbsolutePathBuf::relative_to_current_dir("aren.sock")?,
             }
         );
         Ok(())
@@ -2197,7 +2197,7 @@ mod tests {
     #[test]
     fn resolve_remote_addr_accepts_absolute_socket_path() -> color_eyre::Result<()> {
         let temp_dir = TempDir::new()?;
-        let socket_path = temp_dir.path().join("codex.sock");
+        let socket_path = temp_dir.path().join("aren.sock");
         assert_eq!(
             resolve_remote_addr(&format!("unix://{}", socket_path.display()))?,
             RemoteAppServerEndpoint::UnixSocket {
@@ -2252,7 +2252,7 @@ mod tests {
     #[test]
     fn app_server_target_for_launch_uses_local_daemon_for_default_socket() -> color_eyre::Result<()>
     {
-        let socket_path = AbsolutePathBuf::relative_to_current_dir("codex.sock")?;
+        let socket_path = AbsolutePathBuf::relative_to_current_dir("aren.sock")?;
         let target = app_server_target_for_launch(
             /*explicit_remote_endpoint*/ None,
             Some(socket_path.clone()),
@@ -2295,7 +2295,7 @@ mod tests {
     #[test]
     fn app_server_target_for_launch_skips_local_daemon_when_launch_config_is_not_replayable()
     -> color_eyre::Result<()> {
-        let socket_path = AbsolutePathBuf::relative_to_current_dir("codex.sock")?;
+        let socket_path = AbsolutePathBuf::relative_to_current_dir("aren.sock")?;
         let target = app_server_target_for_launch(
             /*explicit_remote_endpoint*/ None,
             Some(socket_path),
@@ -2349,7 +2349,7 @@ mod tests {
     fn should_load_configured_environments_for_local_daemon() -> color_eyre::Result<()> {
         let target = AppServerTarget::LocalDaemon {
             endpoint: RemoteAppServerEndpoint::UnixSocket {
-                socket_path: AbsolutePathBuf::relative_to_current_dir("codex.sock")?,
+                socket_path: AbsolutePathBuf::relative_to_current_dir("aren.sock")?,
             },
         };
 
@@ -2404,7 +2404,7 @@ mod tests {
         let cwd = temp_dir.path().join("project");
         let target = AppServerTarget::LocalDaemon {
             endpoint: RemoteAppServerEndpoint::UnixSocket {
-                socket_path: AbsolutePathBuf::relative_to_current_dir("codex.sock")?,
+                socket_path: AbsolutePathBuf::relative_to_current_dir("aren.sock")?,
             },
         };
 
@@ -2645,7 +2645,7 @@ mod tests {
         };
         let target = AppServerTarget::Remote {
             endpoint: RemoteAppServerEndpoint::UnixSocket {
-                socket_path: AbsolutePathBuf::relative_to_current_dir("codex.sock")?,
+                socket_path: AbsolutePathBuf::relative_to_current_dir("aren.sock")?,
             },
         };
         let environment_manager = EnvironmentManager::default_for_tests();
@@ -2682,7 +2682,7 @@ mod tests {
         let temp_dir = TempDir::new()?;
         let target = AppServerTarget::LocalDaemon {
             endpoint: RemoteAppServerEndpoint::UnixSocket {
-                socket_path: AbsolutePathBuf::relative_to_current_dir("codex.sock")?,
+                socket_path: AbsolutePathBuf::relative_to_current_dir("aren.sock")?,
             },
         };
         let environment_manager = EnvironmentManager::default_for_tests();

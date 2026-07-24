@@ -8,8 +8,8 @@ NON_INTERACTIVE="${CODEX_NON_INTERACTIVE:-false}"
 BIN_DIR="${CODEX_INSTALL_DIR:-$HOME/.local/bin}"
 BIN_PATH="$BIN_DIR/codex"
 CODE_MODE_HOST_BIN_PATH="$BIN_DIR/codex-code-mode-host"
-CODEX_HOME_DIR="${CODEX_HOME:-$HOME/.codex}"
-STANDALONE_ROOT="$CODEX_HOME_DIR/packages/standalone"
+AREN_HOME_DIR="${AREN_HOME:-$HOME/.aren}"
+STANDALONE_ROOT="$AREN_HOME_DIR/packages/standalone"
 RELEASES_DIR="$STANDALONE_ROOT/releases"
 CURRENT_LINK="$STANDALONE_ROOT/current"
 LOCK_FILE="$STANDALONE_ROOT/install.lock"
@@ -570,7 +570,7 @@ cleanup_stale_install_artifacts() {
   find "$STANDALONE_ROOT" -mindepth 1 -maxdepth 1 -name '.current.*' -exec rm -f {} +
 
   if [ -d "$BIN_DIR" ]; then
-    find "$BIN_DIR" -mindepth 1 -maxdepth 1 -name '.codex.*' -exec rm -f {} +
+    find "$BIN_DIR" -mindepth 1 -maxdepth 1 -name '.aren.*' -exec rm -f {} +
   fi
 }
 
@@ -866,7 +866,7 @@ release_codex_relative_path() {
 update_visible_command() {
   release_dir="$1"
   mkdir -p "$BIN_DIR"
-  tmp_link="$BIN_DIR/.codex.$$"
+  tmp_link="$BIN_DIR/.aren.$$"
   codex_relative_path="$(release_codex_relative_path "$release_dir")"
 
   replace_path_with_symlink "$BIN_PATH" "$CURRENT_LINK/$codex_relative_path" "$tmp_link"

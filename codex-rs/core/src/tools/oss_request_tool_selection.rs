@@ -10,6 +10,18 @@ const MCP_TOOL_NAME_PREFIX: &str = "mcp__";
 const MAX_VISIBLE_MCP_TOOLS: usize = 12;
 const ALWAYS_VISIBLE_MCP_TOOLS: [&str; 2] =
     ["mcp__executor__web_fetch", "mcp__executor__web_search"];
+const INTERACTIVE_SEARCH_MCP_TOOLS: [&str; 4] = [
+    "mcp__chrome_devtools__list_pages",
+    "mcp__chrome_devtools__new_page",
+    "mcp__chrome_devtools__navigate_page",
+    "mcp__chrome_devtools__take_snapshot",
+];
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum McpToolSelectionMode {
+    Default,
+    InteractiveSearch,
+}
 
 /// Keeps Aren's local tools prominent while retrieving relevant MCP tools for the current request.
 #[instrument(
@@ -17,7 +29,11 @@ const ALWAYS_VISIBLE_MCP_TOOLS: [&str; 2] =
     skip_all,
     fields(input_tool_count = tools.len(), query = query.unwrap_or_default())
 )]
-pub(crate) fn select_oss_request_tools(query: Option<&str>, tools: &[ToolSpec]) -> Vec<ToolSpec> {
+pub(crate) fn select_oss_request_tools(
+    query: Option<&str>,
+    tools: &[ToolSpec],
+    mode: McpToolSelectionMode,
+) -> Vec<ToolSpec> {
     let mcp_tool_count = tools.iter().filter(|tool| is_mcp_tool(tool)).count();
     if mcp_tool_count <= MAX_VISIBLE_MCP_TOOLS {
         return tools.to_vec();
@@ -31,7 +47,12 @@ pub(crate) fn select_oss_request_tools(query: Option<&str>, tools: &[ToolSpec]) 
     let mut selected_index_set = selected_indices.iter().copied().collect::<HashSet<_>>();
 
     for (index, tool) in tools.iter().enumerate() {
-        if ALWAYS_VISIBLE_MCP_TOOLS.contains(&tool.name()) && selected_index_set.insert(index) {
+        let name = tool.name();
+        if (ALWAYS_VISIBLE_MCP_TOOLS.contains(&name)
+            || (mode == McpToolSelectionMode::InteractiveSearch
+                && INTERACTIVE_SEARCH_MCP_TOOLS.contains(&name)))
+            && selected_index_set.insert(index)
+        {
             selected_indices.push(index);
         }
     }
