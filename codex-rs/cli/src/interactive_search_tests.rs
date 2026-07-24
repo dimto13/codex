@@ -51,6 +51,69 @@ fn hosted_interactive_search_adds_chrome_guidance() {
 }
 
 #[test]
+fn chrome_tool_approval_is_accepted_in_headless_search() {
+    let request = ElicitationRequest::Form {
+        meta: Some(json!({
+            APPROVAL_KIND_KEY: APPROVAL_KIND_MCP_TOOL_CALL,
+        })),
+        message: "Allow Chrome DevTools to open a page?".to_string(),
+        requested_schema: json!({
+            "type": "object",
+            "properties": {},
+        }),
+    };
+
+    assert_eq!(
+        interactive_search_elicitation_decision("chrome-devtools", &request),
+        ElicitationAction::Accept
+    );
+    assert_eq!(
+        interactive_search_elicitation_decision("chrome_devtools", &request),
+        ElicitationAction::Accept
+    );
+}
+
+#[test]
+fn non_chrome_tool_approval_is_cancelled_in_headless_search() {
+    let request = ElicitationRequest::Form {
+        meta: Some(json!({
+            APPROVAL_KIND_KEY: APPROVAL_KIND_MCP_TOOL_CALL,
+        })),
+        message: "Allow another server to run a tool?".to_string(),
+        requested_schema: json!({
+            "type": "object",
+            "properties": {},
+        }),
+    };
+
+    assert_eq!(
+        interactive_search_elicitation_decision("another-server", &request),
+        ElicitationAction::Cancel
+    );
+}
+
+#[test]
+fn chrome_form_elicitation_is_cancelled_in_headless_search() {
+    let request = ElicitationRequest::Form {
+        meta: None,
+        message: "Enter a value".to_string(),
+        requested_schema: json!({
+            "type": "object",
+            "properties": {
+                "value": {
+                    "type": "string",
+                },
+            },
+        }),
+    };
+
+    assert_eq!(
+        interactive_search_elicitation_decision("chrome-devtools", &request),
+        ElicitationAction::Cancel
+    );
+}
+
+#[test]
 fn ollama_model_info_uses_reported_context_window() {
     let mut expected = codex_models_manager::model_info::model_info_from_slug("gpt-oss:20b");
     expected.used_fallback_model_metadata = false;

@@ -24,6 +24,9 @@ use codex_login::enforce_login_restrictions;
 use codex_ollama::DEFAULT_OSS_MODEL;
 use codex_ollama::OllamaClient;
 use codex_protocol::approvals::ElicitationAction;
+use codex_protocol::approvals::ElicitationRequest;
+use codex_protocol::mcp_approval_meta::APPROVAL_KIND_KEY;
+use codex_protocol::mcp_approval_meta::APPROVAL_KIND_MCP_TOOL_CALL;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::openai_models::ModelsResponse;
 use codex_protocol::openai_models::ReasoningEffort;
@@ -433,11 +436,15 @@ async fn run_headless_session(
                             .await?;
                     }
                     EventMsg::ElicitationRequest(event) => {
+                        let decision = interactive_search_elicitation_decision(
+                            &event.server_name,
+                            &event.request,
+                        );
                         thread
                             .submit(Op::ResolveElicitation {
                                 server_name: event.server_name,
                                 request_id: event.id,
-                                decision: ElicitationAction::Cancel,
+                                decision,
                                 content: None,
                                 meta: None,
                             })
@@ -463,6 +470,43 @@ async fn run_headless_session(
                 }
             }
         }
+    }
+}
+
+fn interactive_search_elicitation_decision(
+    server_name: &str,
+    request: &ElicitationRequest,
+) -> ElicitationAction {
+    let is_chrome_devtools = server_name
+        .chars()
+        .filter(char::is_ascii_alphanumeric)
+        .map(|character| character.to_ascii_lowercase())
+        .eq("chromedevtools".chars());
+    let ElicitationRequest::Form {
+        meta: Some(meta),
+        requested_schema,
+        ..
+    } = request
+    else {
+        return ElicitationAction::Cancel;
+    };
+    let is_tool_approval = meta
+        .as_object()
+        .and_then(|meta| meta.get(APPROVAL_KIND_KEY))
+        .and_then(serde_json::Value::as_str)
+        == Some(APPROVAL_KIND_MCP_TOOL_CALL);
+    let is_empty_object_schema = requested_schema.as_object().is_some_and(|schema| {
+        schema.get("type").and_then(serde_json::Value::as_str) == Some("object")
+            && schema
+                .get("properties")
+                .and_then(serde_json::Value::as_object)
+                .is_some_and(serde_json::Map::is_empty)
+    });
+
+    if is_chrome_devtools && is_tool_approval && is_empty_object_schema {
+        ElicitationAction::Accept
+    } else {
+        ElicitationAction::Cancel
     }
 }
 

@@ -12,14 +12,14 @@ run_dir="${state_root}/${run_id}"
 case "${mode}" in
   quick)
     queries=(
-      "Öffne die offizielle OpenAI-Webseite in Chrome, nenne ihren Seitentitel und gib die geprüfte URL als Quelle an."
+      "Öffne mit Chrome die offizielle IANA-Seite zu reservierten Beispieldomains unter https://www.iana.org/help/example-domains, nenne ihren Seitentitel und gib die geprüfte URL als Quelle an."
     )
     ;;
   full)
     queries=(
-      "Öffne die offizielle OpenAI-Webseite in Chrome, nenne ihren Seitentitel und gib die geprüfte URL als Quelle an."
-      "Recherchiere mit Chrome das heutige Datum in Deutschland sowie die aktuelle UTC-Abweichung für Berlin. Prüfe die Angaben auf mindestens einer maßgeblichen Webseite und nenne die Quellen."
-      "Recherchiere mit Chrome die aktuelle stabile Rust-Version. Gleiche die Angabe mit der offiziellen Rust-Webseite ab und nenne Version, Veröffentlichungsdatum und Quelle."
+      "Öffne mit Chrome die offizielle IANA-Seite zu reservierten Beispieldomains unter https://www.iana.org/help/example-domains, nenne ihren Seitentitel und gib die geprüfte URL als Quelle an."
+      "Recherchiere mit Chrome auf https://www.timeanddate.com/worldclock/germany/berlin das heutige Datum in Deutschland sowie die aktuelle UTC-Abweichung für Berlin und nenne die geprüfte URL als Quelle."
+      "Recherchiere mit Chrome die aktuelle stabile Rust-Version. Gleiche Version und Veröffentlichungsdatum mit https://blog.rust-lang.org/releases/latest/ ab und nenne die geprüfte URL als Quelle."
     )
     ;;
   *)
