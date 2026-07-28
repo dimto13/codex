@@ -138,7 +138,7 @@ jobs:
   build-windows:
     name: Build Aren for windows-x86_64
     runs-on: windows-latest
-    timeout-minutes: 90
+    timeout-minutes: 180
     defaults:
       run:
         working-directory: codex-rs
