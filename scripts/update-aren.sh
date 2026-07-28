@@ -3,9 +3,8 @@
 set -euo pipefail
 
 repository="${AREN_GITHUB_REPOSITORY:-dimto13/codex}"
-release_tag="${AREN_RELEASE_TAG:-aren-edge}"
+release_tag="${AREN_RELEASE_TAG:-}"
 install_dir="${AREN_INSTALL_DIR:-${HOME}/.local/bin}"
-archive_name="aren-linux-x86_64.tar.gz"
 
 usage() {
   cat <<'EOF'
@@ -14,7 +13,7 @@ Usage: aren-update [--tag TAG] [--repo OWNER/REPO] [--install-dir DIR]
 Install an Aren release without modifying the official `codex` command.
 
 Options:
-  --tag TAG          Release tag to install (default: aren-edge)
+  --tag TAG          Release tag to install (default: latest stable release)
   --repo OWNER/REPO  GitHub repository (default: dimto13/codex)
   --install-dir DIR  Installation directory (default: ~/.local/bin)
   -h, --help         Show this help
@@ -50,14 +49,50 @@ while (($# > 0)); do
   esac
 done
 
-if [[ "$(uname -s)" != "Linux" || "$(uname -m)" != "x86_64" ]]; then
-  echo "Aren releases currently support Linux x86_64 only." >&2
-  exit 1
-fi
+case "$(uname -s):$(uname -m)" in
+  Linux:x86_64)
+    release_platform="linux-x86_64"
+    ;;
+  Linux:aarch64|Linux:arm64)
+    release_platform="linux-aarch64"
+    ;;
+  *)
+    echo "Aren releases currently support Linux x86_64 and Linux ARM64." >&2
+    exit 1
+    ;;
+esac
 
 temporary_dir="$(mktemp -d)"
 trap 'rm -rf "${temporary_dir}"' EXIT
 
+resolve_latest_release_tag() {
+  if command -v gh >/dev/null 2>&1 \
+    && { [[ -n "${GH_TOKEN:-}" ]] || [[ -n "${GITHUB_TOKEN_CLASSIC:-}" ]] || gh auth status >/dev/null 2>&1; }; then
+    if [[ -z "${GH_TOKEN:-}" && -n "${GITHUB_TOKEN_CLASSIC:-}" ]]; then
+      export GH_TOKEN="${GITHUB_TOKEN_CLASSIC}"
+    fi
+    gh release view \
+      --repo "${repository}" \
+      --json tagName \
+      --jq .tagName
+    return
+  fi
+
+  curl --fail --silent --show-error --location \
+    "https://api.github.com/repos/${repository}/releases/latest" \
+    | sed -n 's/^[[:space:]]*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' \
+    | head -n 1
+}
+
+if [[ -z "${release_tag}" ]]; then
+  release_tag="$(resolve_latest_release_tag)"
+fi
+[[ "${release_tag}" =~ ^aren-v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]] || {
+  echo "Invalid or unavailable Aren release tag: ${release_tag:-<empty>}" >&2
+  exit 1
+}
+
+archive_name="aren-${release_platform}.tar.gz"
 checksum_name="${archive_name}.sha256"
 release_url="https://github.com/${repository}/releases/download/${release_tag}"
 
@@ -87,12 +122,20 @@ fi
 (cd "${temporary_dir}" && sha256sum --check "${checksum_name}")
 tar -C "${temporary_dir}" -xzf "${temporary_dir}/${archive_name}"
 [[ -x "${temporary_dir}/aren" ]] || { echo "Release does not contain an executable Aren binary." >&2; exit 1; }
-"${temporary_dir}/aren" --version
+[[ -x "${temporary_dir}/aren-update" ]] || { echo "Release does not contain the Aren updater." >&2; exit 1; }
+expected_version="${release_tag#aren-v}"
+[[ "$("${temporary_dir}/aren" --version)" == "aren ${expected_version}" ]] || {
+  echo "Downloaded Aren binary does not match ${release_tag}." >&2
+  exit 1
+}
 
 mkdir -p "${install_dir}"
 temporary_target="${install_dir}/.aren.$$.new"
-trap 'rm -rf "${temporary_dir}"; rm -f "${temporary_target:-}"' EXIT
+temporary_updater="${install_dir}/.aren-update.$$.new"
+trap 'rm -rf "${temporary_dir}"; rm -f "${temporary_target:-}" "${temporary_updater:-}"' EXIT
 install -m 0755 "${temporary_dir}/aren" "${temporary_target}"
+install -m 0755 "${temporary_dir}/aren-update" "${temporary_updater}"
 mv -f "${temporary_target}" "${install_dir}/aren"
+mv -f "${temporary_updater}" "${install_dir}/aren-update"
 
 echo "Aren ${release_tag} installed at ${install_dir}/aren"

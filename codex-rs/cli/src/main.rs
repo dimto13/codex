@@ -40,6 +40,7 @@ use codex_utils_cli::SandboxModeCliArg;
 use codex_utils_cli::SharedCliOptions;
 use codex_utils_oss::AREN_DEFAULT_OLLAMA_MODEL;
 use codex_utils_oss::AREN_DEFAULT_OSS_PROVIDER;
+use codex_utils_oss::AREN_VERSION;
 use owo_colors::OwoColorize;
 use std::collections::HashSet;
 use std::ffi::OsStr;
@@ -849,6 +850,20 @@ fn run_update_command() -> anyhow::Result<()> {
 
 fn run_aren_update_command() -> anyhow::Result<()> {
     println!("Updating Aren via `aren-update`...");
+    #[cfg(windows)]
+    let status = {
+        let parent_process_id = std::process::id().to_string();
+        std::process::Command::new("cmd")
+            .args([
+                "/C",
+                "aren-update",
+                "-ParentProcessId",
+                parent_process_id.as_str(),
+            ])
+            .status()
+            .map_err(|error| anyhow::anyhow!("failed to start `aren-update`: {error}"))?
+    };
+    #[cfg(not(windows))]
     let status = std::process::Command::new("aren-update")
         .status()
         .map_err(|error| anyhow::anyhow!("failed to start `aren-update`: {error}"))?;
@@ -1011,6 +1026,7 @@ fn multitool_command_for_invocation(arg0: Option<&OsStr>) -> clap::Command {
         command
             .name("aren")
             .bin_name("aren")
+            .version(AREN_VERSION)
             .override_usage("aren [OPTIONS] [PROMPT]\n       aren [OPTIONS] <COMMAND> [ARGS]")
     } else {
         command
@@ -3084,7 +3100,7 @@ mod tests {
         let Err(error) = command.try_get_matches_from(["aren", "--version"]) else {
             panic!("--version should short-circuit parsing");
         };
-        assert!(error.to_string().starts_with("aren "));
+        assert_eq!(error.to_string(), format!("aren {AREN_VERSION}\n"));
     }
 
     #[test]

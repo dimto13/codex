@@ -17,6 +17,12 @@ pub const AREN_DEFAULT_OSS_PROVIDER: &str = OLLAMA_OSS_PROVIDER_ID;
 /// Ollama model selected when Aren is launched without a model flag.
 pub const AREN_DEFAULT_OLLAMA_MODEL: &str = "gemma4:e4b";
 
+/// Aren release version embedded by the release build.
+pub const AREN_VERSION: &str = match option_env!("AREN_VERSION") {
+    Some(version) => version,
+    None => env!("CARGO_PKG_VERSION"),
+};
+
 /// Returns the default model for a given OSS provider.
 pub fn get_default_model_for_oss_provider(provider_id: &str) -> Option<&'static str> {
     match provider_id {

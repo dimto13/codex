@@ -1,50 +1,56 @@
-# Aren builds and updates
+# Aren builds, installation and updates
 
-`aren` is the personal Codex build from `dimto13/codex`. It is installed under a
-different name so it can coexist with the official `codex` command.
+`aren` is the local-model build from `dimto13/codex`. It coexists with the
+official `codex` command and stores its state under `~/.aren`.
 
-## Current release process: GitHub Actions
+## Release architecture
 
-For now, GitHub Actions and GitHub Releases are the primary Aren release path.
-This keeps release compilation away from local machines and the resource-limited
-Jenkins NAS. The public repository can use standard GitHub-hosted runners
-without consuming paid Actions minutes.
+GitHub Actions has two narrowly scoped responsibilities:
 
-The standard hosted runner is an ephemeral virtual machine and is discarded
-after the job, so it does not pollute Jenkins with Rust, V8, linker, or packaging
-dependencies. A separate build container is therefore not required for the
-initial process. If a self-hosted runner becomes necessary later, its build
-should run in a pinned container with the same two-job Cargo limit. Jenkins may
-download and deploy a verified release, but is not the primary compiler.
+- `aren-ci` provides fast pull-request feedback.
+- `aren-release` runs only for an explicit `aren-v*` tag or a manual build
+  rehearsal.
 
-Tags beginning with `aren-v` build Linux x86_64 with two Cargo jobs, smoke-test
-the result, and publish an immutable GitHub Release containing the standalone
-binary, compressed archive, `BUILD-INFO.txt`, and SHA-256 checksum. Actions
-artifacts expire after seven days; the corresponding GitHub Release assets are
-the durable download location.
+Normal branch pushes do not build or publish releases. The remaining inherited
+workflows are disabled. A tag-triggered release builds on the actual target
+runner, smoke-tests the binary, creates a platform archive and SHA-256 checksum,
+and publishes immutable GitHub Release assets.
 
-The initial release is created with:
+The release targets are:
+
+| Platform | Archive | Standalone binary |
+| --- | --- | --- |
+| Linux x86_64 | `aren-linux-x86_64.tar.gz` | `aren-linux-x86_64` |
+| Linux ARM64 | `aren-linux-aarch64.tar.gz` | `aren-linux-aarch64` |
+| Windows x86_64 | `aren-windows-x86_64.zip` | `aren-windows-x86_64.exe` |
+
+Linux archives contain `aren`, `aren-update` and `BUILD-INFO.txt`. The Windows
+archive contains `aren.exe`, `aren-update.ps1`, `aren-update.cmd` and
+`BUILD-INFO.txt`.
+
+## Install on Linux
+
+The standalone updater detects x86_64 versus ARM64, resolves the latest stable
+GitHub Release, verifies its checksum and atomically installs both Aren and the
+updater:
 
 ```shell
-git tag -a aren-v0.1.0 -m "Aren 0.1.0"
-git push origin aren-v0.1.0
+mkdir -p "$HOME/.local/bin"
+curl -fsSL \
+  https://github.com/dimto13/codex/releases/latest/download/aren-update \
+  -o "$HOME/.local/bin/aren-update"
+chmod 0755 "$HOME/.local/bin/aren-update"
+export PATH="$HOME/.local/bin:$PATH"
+aren-update
 ```
 
-The workflow can also be started manually to test a revision without publishing
-a release. Normal branch pushes do not start a release build.
+Install a specific immutable release with:
 
-The currently verified release is `aren-v0.1.1`. The initial `aren-v0.1.0`
-release remains immutable; live validation found a cancelled Chrome tool
-approval there, so the correction was published as a new patch release.
+```shell
+aren-update --tag aren-v0.1.2
+```
 
-The current workflow targets Linux x86_64. Windows artifacts are the next
-platform goal and will use a standard GitHub-hosted Windows runner so the native
-Windows sandbox binaries are built, packaged, and smoke-tested in their actual
-runtime environment.
-
-## Install and update
-
-Install a downloaded GitHub Release artifact with:
+A manually downloaded archive can be installed with the repository helper:
 
 ```shell
 scripts/install-aren-artifact.sh \
@@ -52,71 +58,122 @@ scripts/install-aren-artifact.sh \
   aren-linux-x86_64.tar.gz.sha256
 ```
 
-This installs the versioned binary under `~/.local/lib/aren/` and atomically
-activates `~/.local/bin/aren`. Run the repeatable live quality suite with:
+## Install on Windows
+
+Run in PowerShell on Windows x86_64:
+
+```powershell
+$installDir = Join-Path $HOME ".local\bin"
+New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+Invoke-WebRequest `
+  https://github.com/dimto13/codex/releases/latest/download/aren-update.ps1 `
+  -OutFile (Join-Path $installDir "aren-update.ps1")
+Invoke-WebRequest `
+  https://github.com/dimto13/codex/releases/latest/download/aren-update.cmd `
+  -OutFile (Join-Path $installDir "aren-update.cmd")
+& (Join-Path $installDir "aren-update.ps1")
+```
+
+Add `$HOME\.local\bin` to the user `PATH`. A particular release can be selected
+with:
+
+```powershell
+aren-update -Tag aren-v0.1.2
+```
+
+## Local prerequisites
+
+The release contains the Aren application, not the model server or personal
+configuration. Each target machine needs Ollama and the default model:
 
 ```shell
+ollama pull gemma4:e4b
+```
+
+Run `aren` once Ollama is available. Personal configuration, MCP registrations,
+skills and plugins live under `~/.aren/`. Executor must be installed separately
+on every machine where its MCP tools should be available. Do not casually copy
+credential files such as `auth.json`.
+
+## Create a release
+
+First verify the intended commit and the lightweight CI:
+
+```shell
+git status --short
+gh pr checks 1 --repo dimto13/codex
+```
+
+The release version is taken from the annotated tag and embedded into
+`aren --version` and the TUI. For example:
+
+```shell
+git tag -a aren-v0.1.2 -m "Aren 0.1.2"
+git push origin aren-v0.1.2
+```
+
+Watch the real release path:
+
+```shell
+gh run list \
+  --repo dimto13/codex \
+  --workflow aren-release.yml \
+  --branch aren-v0.1.2 \
+  --limit 1
+gh run watch RUN_ID --repo dimto13/codex --exit-status
+gh release view aren-v0.1.2 --repo dimto13/codex
+```
+
+A manual rehearsal builds and uploads temporary Actions artifacts but does not
+publish a GitHub Release:
+
+```shell
+gh workflow run aren-release.yml \
+  --repo dimto13/codex \
+  --ref custom/interactive-search
+```
+
+Never move or reuse a tag after its GitHub Release has been published. Correct
+a released defect with a new patch version.
+
+## Release verification
+
+After publication, download the release into an empty directory and verify all
+checksums:
+
+```shell
+gh release download aren-v0.1.2 \
+  --repo dimto13/codex \
+  --pattern 'aren-*.tar.gz' \
+  --pattern 'aren-*.zip' \
+  --pattern '*.sha256'
+sha256sum --check ./*.sha256
+```
+
+On Linux, test the public unauthenticated installation path in an isolated
+directory before activating it for daily use. Then run:
+
+```shell
+aren --version
+aren interactive-search --help
 scripts/quality/aren-live-quality.sh quick
 scripts/quality/aren-live-quality.sh full
 ```
 
-The live suite requires Chrome DevTools MCP, exercises real
-`interactive-search` requests, and stores JSON answers, sources, and error logs
-under `~/.local/state/aren/live-quality/`.
+The live suite requires Chrome DevTools MCP and stores evidence under
+`~/.local/state/aren/live-quality/`.
 
-Use an isolated Chrome profile when several Codex/Aren processes or quality
-runs can overlap:
+## Verified release history
 
-```toml
-[mcp_servers.chrome-devtools]
-command = "npx"
-args = [
-  "-y",
-  "chrome-devtools-mcp@1.6.0",
-  "--executablePath",
-  "/usr/bin/google-chrome-stable",
-  "--headless",
-  "true",
-  "--isolated",
-  "true",
-]
-```
-
-The suite rejects missing sources and answers that report a blocked, cancelled,
-failed, or unavailable Chrome path. A successful result is written only after
-every case passes.
-
-The GitHub release updater remains available for direct installation:
-
-```shell
-aren-update --tag aren-v0.1.1
-```
-
-The updater downloads only from `dimto13/codex` and writes only the `aren`
-executable. It never replaces the official `codex` installation.
-
-## Verified release record
-
-The following chain was completed on 24 July 2026:
-
-- GitHub Actions run:
-  <https://github.com/dimto13/codex/actions/runs/30077082603>
-- Immutable release:
-  <https://github.com/dimto13/codex/releases/tag/aren-v0.1.1>
-- Release commit:
-  `36e71bffec126d1d13356e1608e66c117219448f`
-- SHA-256 verification passed; archive and standalone binary were byte-identical.
-- `BUILD-INFO.txt`, the annotated tag, and the downloaded binary all resolved to
-  the same commit.
-- Local quick result:
-  `~/.local/state/aren/live-quality/20260724T085320Z/RESULT.txt`
-- Local full result:
-  `~/.local/state/aren/live-quality/20260724T085416Z/RESULT.txt`
+`aren-v0.1.1` was published on 24 July 2026 from commit
+`36e71bffec126d1d13356e1608e66c117219448f`. Its Linux x86_64 checksum,
+archive contents, installed binary and live quality suite were verified. The
+release remains immutable as a rollback target.
 
 ## Pull upstream changes
 
 Rebase the personal branch onto the official repository and push the updated
-branch. Create a new `aren-v*` tag only when an immutable release is intended:
+branch:
 
 ```shell
 git fetch upstream
@@ -124,5 +181,4 @@ git rebase upstream/main
 git push --force-with-lease origin custom/interactive-search
 ```
 
-Use `--force-with-lease` after a rebase so Git refuses to overwrite unexpected
-remote work.
+Create an `aren-v*` tag only when a new immutable release is intended.
