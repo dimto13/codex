@@ -25,24 +25,21 @@ If you want Codex in your code editor (VS Code, Cursor, Windsurf), <a href="http
 - [x] Allgemeine lokale Anfragen zu Dateien, Systemzustand und Git werden mit
   den vorhandenen Shell-Werkzeugen gelöst; große MCP-/App-Werkzeugkataloge
   werden pro Anfrage relevant gefiltert statt durch Einzelfall-Skripte ersetzt.
+- [x] GitHub Actions ist für dieses Repository vollständig deaktiviert. Builds,
+  Tests und Veröffentlichungen sollen künftig über Jenkins laufen.
 
-## Vorläufiger Aren-Releaseprozess
+## Geplanter Aren-Releaseprozess
 
-- GitHub Actions ist der primäre Release-Builder. Release-Kompilierung läuft
-  weder auf dem lokalen Entwicklungsrechner noch auf dem Jenkins-NAS.
-- Ein Tag im Format `aren-v*` baut mit begrenzter Cargo-Parallelität zunächst
-  Linux x86_64 und veröffentlicht Binary, Archiv, Build-Info und SHA-256 als
-  dauerhafte GitHub-Release-Dateien.
-- Normale Branch-Pushes lösen keinen Release aus. Manuelle Workflowläufe bauen
-  nur Testartefakte und veröffentlichen kein Release.
-- Windows ist als nächster Zieltyp vorgesehen und soll auf einem nativen
-  GitHub-hosted Windows Runner gebaut und geprüft werden.
-- Lokal erfolgen ressourcenschonende, gezielte Crate-Tests. Umfangreiche
-  Testmatrizen werden in getrennte CI-Jobs aufgeteilt, statt ungebremst den
-  gesamten Workspace parallel zu linken.
-- Nach Veröffentlichung wird das Release lokal installiert und mit der
-  wiederholbaren Quick-/Full-Live-Qualitätssuite einschließlich Chrome MCP
-  geprüft.
+- Die geerbten GitHub-Workflows bleiben als Upstream-Referenz im Repository,
+  werden durch die repositoryweite Actions-Sperre aber nicht ausgeführt.
+- Die vorhandenen GitHub Releases bleiben verfügbar. Neue Releases können
+  unabhängig von GitHub Actions durch Jenkins oder manuell über die GitHub-API
+  einschließlich Binary, Archiv, Build-Info und SHA-256 veröffentlicht werden.
+- Jenkins soll künftig Build, Tests, Paketierung, Prüfsummen, Smoke-Tests und
+  die Veröffentlichung unveränderlicher Tags im Format `aren-v*` übernehmen.
+- Der Jenkins-Releasepfad ist noch nicht eingerichtet oder im realen
+  Ausführungskontext verifiziert. Bis dahin gibt es bewusst keine automatische
+  CI/CD- oder Release-Pipeline.
 
 ## Verifizierter Aren-Stand
 
