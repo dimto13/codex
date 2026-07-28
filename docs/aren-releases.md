@@ -47,7 +47,7 @@ aren-update
 Install a specific immutable release with:
 
 ```shell
-aren-update --tag aren-v0.1.2
+aren-update --tag aren-v0.1.4
 ```
 
 A manually downloaded archive can be installed with the repository helper:
@@ -78,7 +78,7 @@ Add `$HOME\.local\bin` to the user `PATH`. A particular release can be selected
 with:
 
 ```powershell
-aren-update -Tag aren-v0.1.2
+aren-update -Tag aren-v0.1.4
 ```
 
 ## Local prerequisites
@@ -108,8 +108,8 @@ The release version is taken from the annotated tag and embedded into
 `aren --version` and the TUI. For example:
 
 ```shell
-git tag -a aren-v0.1.2 -m "Aren 0.1.2"
-git push origin aren-v0.1.2
+git tag -a aren-v0.1.5 -m "Aren 0.1.5"
+git push origin aren-v0.1.5
 ```
 
 Watch the real release path:
@@ -118,10 +118,10 @@ Watch the real release path:
 gh run list \
   --repo dimto13/codex \
   --workflow aren-release.yml \
-  --branch aren-v0.1.2 \
+  --branch aren-v0.1.5 \
   --limit 1
 gh run watch RUN_ID --repo dimto13/codex --exit-status
-gh release view aren-v0.1.2 --repo dimto13/codex
+gh release view aren-v0.1.5 --repo dimto13/codex
 ```
 
 A manual rehearsal builds and uploads temporary Actions artifacts but does not
@@ -142,7 +142,7 @@ After publication, download the release into an empty directory and verify all
 checksums:
 
 ```shell
-gh release download aren-v0.1.2 \
+gh release download aren-v0.1.4 \
   --repo dimto13/codex \
   --pattern 'aren-*.tar.gz' \
   --pattern 'aren-*.zip' \
@@ -164,6 +164,18 @@ The live suite requires Chrome DevTools MCP and stores evidence under
 `~/.local/state/aren/live-quality/`.
 
 ## Verified release history
+
+`aren-v0.1.4` was published on 28 July 2026 from commit
+`6438c9882bdddedc13c1f60284344817d658c9d2`. Linux x86_64, Linux ARM64 and
+Windows x86_64 were built and smoke-tested on their real GitHub-hosted runners.
+All three archive checksums, platform metadata and archive contents were
+verified. The public unauthenticated `latest` updater installed `aren 0.1.4`
+and the resulting CLI identified itself as `Aren CLI`.
+
+The initial automated publication rejected valid Windows CRLF metadata after
+all platform builds had passed. The comparison was corrected on `main`, and
+the immutable `aren-v0.1.4` tag was published from the already verified runner
+artifacts without moving the tag or rebuilding different source.
 
 `aren-v0.1.1` was published on 24 July 2026 from commit
 `36e71bffec126d1d13356e1608e66c117219448f`. Its Linux x86_64 checksum,
