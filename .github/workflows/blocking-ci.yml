@@ -1,7 +1,7 @@
 name: aren-ci
 
-# Aren keeps a small GitHub-hosted feedback loop while builds and releases move
-# to Jenkins. Only checks that already run reliably in this fork belong here.
+# Aren keeps a small GitHub-hosted feedback loop. Only checks that already run
+# reliably in this fork belong here.
 on:
   pull_request: {}
   push:
