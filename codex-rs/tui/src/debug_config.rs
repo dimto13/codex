@@ -635,9 +635,9 @@ mod tests {
             absolute_path("/etc/codex/config.toml")
         };
         let project_folder = if cfg!(windows) {
-            absolute_path("C:\\repo\\.codex")
+            absolute_path("C:\\repo\\.aren")
         } else {
-            absolute_path("/repo/.codex")
+            absolute_path("/repo/.aren")
         };
 
         let layers = vec![
@@ -795,9 +795,9 @@ mod tests {
         };
 
         let user_file = if cfg!(windows) {
-            absolute_path("C:\\users\\alice\\.codex\\config.toml")
+            absolute_path("C:\\users\\alice\\.aren\\config.toml")
         } else {
-            absolute_path("/home/alice/.codex/config.toml")
+            absolute_path("/home/alice/.aren/config.toml")
         };
         let stack = ConfigLayerStack::new(
             vec![ConfigLayerEntry::new(
@@ -987,7 +987,7 @@ mod tests {
                     unix_sockets: Some(NetworkUnixSocketPermissionsToml {
                         entries: BTreeMap::from([
                             (
-                                "/tmp/codex.sock".to_string(),
+                                "/tmp/aren.sock".to_string(),
                                 NetworkUnixSocketPermissionToml::Allow,
                             ),
                             (
@@ -1010,7 +1010,7 @@ mod tests {
         let rendered = render_stack_to_text(&stack);
         let requirements_source = (RequirementSource::LegacyManagedConfigTomlFromMdm).to_string();
         assert!(rendered.contains(&format!(
-            "experimental_network: unix_sockets={{/tmp/blocked.sock=deny, /tmp/codex.sock=allow}} (source: {requirements_source})"
+            "experimental_network: unix_sockets={{/tmp/aren.sock=allow, /tmp/blocked.sock=deny}} (source: {requirements_source})"
         )));
     }
 

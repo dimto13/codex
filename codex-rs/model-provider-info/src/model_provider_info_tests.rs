@@ -36,6 +36,71 @@ base_url = "http://localhost:11434/v1"
 }
 
 #[test]
+fn built_in_oss_providers_use_backend_names_and_remain_oss() {
+    let ollama = create_oss_provider(DEFAULT_OLLAMA_PORT, WireApi::Responses);
+    let lmstudio = create_oss_provider(DEFAULT_LMSTUDIO_PORT, WireApi::Responses);
+
+    assert_eq!((ollama.name.as_str(), ollama.is_oss()), ("Ollama", true));
+    assert_eq!(
+        (lmstudio.name.as_str(), lmstudio.is_oss()),
+        ("LM Studio", true)
+    );
+}
+
+#[test]
+fn aren_ollama_url_selects_remote_server_and_normalizes_openai_root() {
+    let provider = create_oss_provider_with_environment(
+        DEFAULT_OLLAMA_PORT,
+        WireApi::Responses,
+        OssProviderEnvironment {
+            aren_ollama_base_url: Some(" 192.168.1.25:11434/ ".to_string()),
+            ollama_host: Some("http://ignored.example:11434".to_string()),
+            legacy_base_url: Some("http://legacy.example:11434/v1".to_string()),
+            legacy_port: None,
+        },
+    );
+
+    assert_eq!(
+        provider.base_url,
+        Some("http://192.168.1.25:11434/v1".to_string())
+    );
+}
+
+#[test]
+fn ollama_host_is_used_when_aren_url_is_not_configured() {
+    let provider = create_oss_provider_with_environment(
+        DEFAULT_OLLAMA_PORT,
+        WireApi::Responses,
+        OssProviderEnvironment {
+            ollama_host: Some("https://ollama.internal/v1/".to_string()),
+            ..OssProviderEnvironment::default()
+        },
+    );
+
+    assert_eq!(
+        provider.base_url,
+        Some("https://ollama.internal/v1".to_string())
+    );
+}
+
+#[test]
+fn aren_ollama_url_does_not_change_lmstudio_provider() {
+    let provider = create_oss_provider_with_environment(
+        DEFAULT_LMSTUDIO_PORT,
+        WireApi::Responses,
+        OssProviderEnvironment {
+            aren_ollama_base_url: Some("http://ollama.internal:11434".to_string()),
+            ..OssProviderEnvironment::default()
+        },
+    );
+
+    assert_eq!(
+        provider.base_url,
+        Some("http://localhost:1234/v1".to_string())
+    );
+}
+
+#[test]
 fn test_deserialize_azure_model_provider_toml() {
     let azure_provider_toml = r#"
 name = "Azure"

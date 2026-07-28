@@ -90,7 +90,9 @@ pub(crate) enum TerminalTitleItem {
 
 impl TerminalTitleItem {
     pub(crate) fn description(self) -> &'static str {
+        let brand = crate::brand::AppBrand::current();
         match self {
+            TerminalTitleItem::AppName if brand.is_aren() => "Aren app name",
             TerminalTitleItem::AppName => "Codex app name",
             TerminalTitleItem::Project => "Project name (falls back to current directory name)",
             TerminalTitleItem::CurrentDir => "Current working directory",
@@ -114,6 +116,7 @@ impl TerminalTitleItem {
             TerminalTitleItem::WeeklyLimit => {
                 "Remaining usage on the secondary usage limit (omitted when unavailable)"
             }
+            TerminalTitleItem::CodexVersion if brand.is_aren() => "Aren application version",
             TerminalTitleItem::CodexVersion => "Codex application version",
             TerminalTitleItem::UsedTokens => "Total tokens used in session (omitted when zero)",
             TerminalTitleItem::TotalInputTokens => "Total input tokens used in session",

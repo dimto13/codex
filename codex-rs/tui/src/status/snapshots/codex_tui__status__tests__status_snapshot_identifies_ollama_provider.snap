@@ -1,0 +1,18 @@
+---
+source: tui/src/status/tests.rs
+expression: sanitized
+---
+/status
+
+╭──────────────────────────────────────────────────────────────────╮
+│  >_ OpenAI Codex (v0.0.0)                                        │
+│                                                                  │
+│  Model:            gemma4:e4b (reasoning high, summaries auto)   │
+│  Model provider:   Ollama                                        │
+│  Directory: [[workspace]]                                        │
+│  Permissions:      Custom (danger-full-access, Ask for approval) │
+│  Agents.md:        <none>                                        │
+│                                                                  │
+│  Token usage:      0 total  (0 input + 0 output)                 │
+│  Limits:           data not available yet                        │
+╰──────────────────────────────────────────────────────────────────╯

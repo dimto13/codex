@@ -960,7 +960,7 @@ mod tests {
 
     #[test]
     fn primary_ipc_socket_path_uses_codex_home() {
-        let codex_home = Path::new("/home/test/.codex");
+        let codex_home = Path::new("/home/test/.aren");
 
         assert_eq!(
             primary_ipc_socket_path(codex_home),

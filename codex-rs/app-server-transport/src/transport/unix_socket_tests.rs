@@ -35,9 +35,9 @@ fn listen_unix_socket_parses_as_unix_socket_transport() {
 #[test]
 fn listen_unix_socket_accepts_absolute_custom_path() {
     assert_eq!(
-        AppServerTransport::from_listen_url("unix:///tmp/codex.sock"),
+        AppServerTransport::from_listen_url("unix:///tmp/aren.sock"),
         Ok(AppServerTransport::UnixSocket {
-            socket_path: absolute_path("/tmp/codex.sock")
+            socket_path: absolute_path("/tmp/aren.sock")
         })
     );
 }
@@ -45,9 +45,9 @@ fn listen_unix_socket_accepts_absolute_custom_path() {
 #[test]
 fn listen_unix_socket_accepts_relative_custom_path() {
     assert_eq!(
-        AppServerTransport::from_listen_url("unix://codex.sock"),
+        AppServerTransport::from_listen_url("unix://aren.sock"),
         Ok(AppServerTransport::UnixSocket {
-            socket_path: AbsolutePathBuf::relative_to_current_dir("codex.sock")
+            socket_path: AbsolutePathBuf::relative_to_current_dir("aren.sock")
                 .expect("relative path should resolve")
         })
     );
@@ -200,12 +200,8 @@ fn default_control_socket_path() -> AbsolutePathBuf {
 }
 
 fn test_socket_path(temp_dir: &Path) -> AbsolutePathBuf {
-    AbsolutePathBuf::from_absolute_path(
-        temp_dir
-            .join("app-server-control")
-            .join("app-server-control.sock"),
-    )
-    .expect("socket path should resolve")
+    AbsolutePathBuf::from_absolute_path(temp_dir.join("app-server-control").join("aren.sock"))
+        .expect("socket path should resolve")
 }
 
 fn test_startup_lock_path(temp_dir: &Path) -> AbsolutePathBuf {

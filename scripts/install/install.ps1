@@ -730,10 +730,10 @@ switch ($architecture) {
     }
 }
 
-$codexHome = if ([string]::IsNullOrWhiteSpace($env:CODEX_HOME)) {
-    Join-Path $env:USERPROFILE ".codex"
+$codexHome = if ([string]::IsNullOrWhiteSpace($env:AREN_HOME)) {
+    Join-Path $env:USERPROFILE ".aren"
 } else {
-    $env:CODEX_HOME
+    $env:AREN_HOME
 }
 $standaloneRoot = Join-Path $codexHome "packages\standalone"
 $releasesDir = Join-Path $standaloneRoot "releases"

@@ -187,6 +187,14 @@ impl ChatWidget {
     }
 
     pub(crate) fn open_all_models_popup(&mut self, presets: Vec<ModelPreset>) {
+        self.open_all_models_popup_for_brand(presets, crate::brand::AppBrand::current());
+    }
+
+    pub(super) fn open_all_models_popup_for_brand(
+        &mut self,
+        presets: Vec<ModelPreset>,
+        brand: crate::brand::AppBrand,
+    ) {
         if presets.is_empty() {
             self.add_info_message(
                 "No additional models are available right now.".to_string(),
@@ -220,10 +228,17 @@ impl ChatWidget {
             });
         }
 
-        let header = self.model_menu_header(
-            "Select Model and Effort",
-            "Access legacy models by running codex -m <model_name> or in your config.toml",
-        );
+        let header = if brand.is_aren() && self.config.model_provider.is_oss() {
+            self.model_menu_header(
+                "Select Local Model and Effort",
+                "Models installed in Ollama. Add more with `ollama pull <model_name>`.",
+            )
+        } else {
+            self.model_menu_header(
+                "Select Model and Effort",
+                "Access legacy models by running codex -m <model_name> or in your config.toml",
+            )
+        };
         self.bottom_pane.show_selection_view(SelectionViewParams {
             footer_hint: Some(self.bottom_pane.standard_popup_hint_line()),
             items,

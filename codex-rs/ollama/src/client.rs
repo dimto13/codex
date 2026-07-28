@@ -19,9 +19,13 @@ use codex_model_provider_info::WireApi;
 #[cfg(test)]
 use codex_model_provider_info::create_oss_provider_with_base_url;
 
-const OLLAMA_CONNECTION_ERROR: &str = "No running Ollama server detected. Start it with: `ollama serve` (after installing). Install instructions: https://github.com/ollama/ollama?tab=readme-ov-file#ollama";
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OllamaModelMetadata {
+    pub capabilities: Vec<String>,
+    pub context_window: Option<i64>,
+}
 
-/// Client for interacting with a local Ollama instance.
+/// Client for interacting with a configured Ollama instance.
 pub struct OllamaClient {
     client: reqwest::Client,
     host_root: String,
@@ -30,7 +34,7 @@ pub struct OllamaClient {
 
 impl OllamaClient {
     /// Construct a client for the built‑in open‑source ("oss") model provider
-    /// and verify that a local Ollama server is reachable. If no server is
+    /// and verify that the configured Ollama server is reachable. If no server is
     /// detected, returns an error with helpful installation/run instructions.
     pub async fn try_from_oss_provider(config: &Config) -> io::Result<Self> {
         // Note that we must look up the provider from the Config to ensure that
@@ -86,7 +90,7 @@ impl OllamaClient {
         };
         let resp = self.client.get(url).send().await.map_err(|err| {
             tracing::warn!("Failed to connect to Ollama server: {err:?}");
-            io::Error::other(OLLAMA_CONNECTION_ERROR)
+            self.connection_error()
         })?;
         if resp.status().is_success() {
             Ok(())
@@ -96,11 +100,18 @@ impl OllamaClient {
                 self.host_root,
                 resp.status()
             );
-            Err(io::Error::other(OLLAMA_CONNECTION_ERROR))
+            Err(self.connection_error())
         }
     }
 
-    /// Return the list of model names known to the local Ollama instance.
+    fn connection_error(&self) -> io::Error {
+        io::Error::other(format!(
+            "Cannot reach Ollama at {}. Check that the server is running and that its bind address and firewall allow this connection.",
+            self.host_root
+        ))
+    }
+
+    /// Return the list of model names known to the configured Ollama instance.
     pub async fn fetch_models(&self) -> io::Result<Vec<String>> {
         let tags_url = format!("{}/api/tags", self.host_root.trim_end_matches('/'));
         let resp = self
@@ -124,6 +135,56 @@ impl OllamaClient {
             })
             .unwrap_or_default();
         Ok(names)
+    }
+
+    /// Return the capabilities advertised by Ollama for a model.
+    pub async fn fetch_model_capabilities(&self, model: &str) -> io::Result<Vec<String>> {
+        Ok(self.fetch_model_metadata(model).await?.capabilities)
+    }
+
+    /// Return the model metadata advertised by Ollama.
+    pub async fn fetch_model_metadata(&self, model: &str) -> io::Result<OllamaModelMetadata> {
+        let show_url = format!("{}/api/show", self.host_root.trim_end_matches('/'));
+        let resp = self
+            .client
+            .post(show_url)
+            .json(&serde_json::json!({"model": model}))
+            .send()
+            .await
+            .map_err(io::Error::other)?;
+        if !resp.status().is_success() {
+            return Err(io::Error::other(format!(
+                "failed to query Ollama capabilities for {model}: HTTP {}",
+                resp.status()
+            )));
+        }
+        let val = resp.json::<JsonValue>().await.map_err(io::Error::other)?;
+        let capabilities = val
+            .get("capabilities")
+            .and_then(JsonValue::as_array)
+            .map(|capabilities| {
+                capabilities
+                    .iter()
+                    .filter_map(JsonValue::as_str)
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let context_window = val
+            .get("model_info")
+            .and_then(JsonValue::as_object)
+            .and_then(|model_info| {
+                model_info.iter().find_map(|(key, value)| {
+                    key.ends_with(".context_length")
+                        .then(|| value.as_i64())
+                        .flatten()
+                        .filter(|context_window| *context_window > 0)
+                })
+            });
+        Ok(OllamaModelMetadata {
+            capabilities,
+            context_window,
+        })
     }
 
     /// Query the server for its version string, returning `None` when unavailable.
@@ -298,6 +359,49 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_fetch_model_metadata() {
+        if std::env::var(codex_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_ok() {
+            tracing::info!(
+                "{} is set; skipping test_fetch_model_metadata",
+                codex_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR
+            );
+            return;
+        }
+
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .and(wiremock::matchers::path("/api/show"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "capabilities": ["completion", "tools", "thinking"],
+                    "model_info": {
+                        "gptoss.context_length": 131_072,
+                    },
+                })),
+            )
+            .mount(&server)
+            .await;
+
+        let client = OllamaClient::from_host_root(server.uri());
+        let actual = client
+            .fetch_model_metadata("gpt-oss:20b")
+            .await
+            .expect("model metadata");
+
+        assert_eq!(
+            actual,
+            OllamaModelMetadata {
+                capabilities: vec![
+                    "completion".to_string(),
+                    "tools".to_string(),
+                    "thinking".to_string(),
+                ],
+                context_window: Some(131_072),
+            }
+        );
+    }
+
+    #[tokio::test]
     async fn test_fetch_version() {
         if std::env::var(codex_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_ok() {
             tracing::info!(
@@ -453,6 +557,12 @@ mod tests {
             .await
             .err()
             .expect("expected error");
-        assert_eq!(OLLAMA_CONNECTION_ERROR, err.to_string());
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "Cannot reach Ollama at {}. Check that the server is running and that its bind address and firewall allow this connection.",
+                server.uri()
+            )
+        );
     }
 }

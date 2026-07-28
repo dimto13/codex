@@ -5,6 +5,7 @@ mod pull;
 mod url;
 
 pub use client::OllamaClient;
+pub use client::OllamaModelMetadata;
 use codex_core::config::Config;
 use codex_model_provider_info::ModelProviderInfo;
 pub use pull::CliProgressReporter;
@@ -16,10 +17,10 @@ use semver::Version;
 /// Default OSS model to use when `--oss` is passed without an explicit `-m`.
 pub const DEFAULT_OSS_MODEL: &str = "gpt-oss:20b";
 
-/// Prepare the local OSS environment when `--oss` is selected.
+/// Prepare the configured OSS environment when `--oss` is selected.
 ///
-/// - Ensures a local Ollama server is reachable.
-/// - Checks if the model exists locally and pulls it if missing.
+/// - Ensures the configured Ollama server is reachable.
+/// - Checks if the model exists on that server and pulls it if missing.
 pub async fn ensure_oss_ready(config: &Config) -> std::io::Result<()> {
     // Only download when the requested model is the default OSS model (or when -m is not provided).
     let model = match config.model.as_ref() {
@@ -27,10 +28,10 @@ pub async fn ensure_oss_ready(config: &Config) -> std::io::Result<()> {
         None => DEFAULT_OSS_MODEL,
     };
 
-    // Verify local Ollama is reachable.
+    // Verify the configured Ollama server is reachable.
     let ollama_client = crate::OllamaClient::try_from_oss_provider(config).await?;
 
-    // If the model is not present locally, pull it.
+    // If the model is not present on the configured server, pull it there.
     match ollama_client.fetch_models().await {
         Ok(models) => {
             if !models.iter().any(|m| m == model) {
@@ -42,7 +43,7 @@ pub async fn ensure_oss_ready(config: &Config) -> std::io::Result<()> {
         }
         Err(err) => {
             // Not fatal; higher layers may still proceed and surface errors later.
-            tracing::warn!("Failed to query local models from Ollama: {}.", err);
+            tracing::warn!("Failed to query models from Ollama: {}.", err);
         }
     }
 
@@ -72,7 +73,7 @@ pub async fn ensure_responses_supported(provider: &ModelProviderInfo) -> std::io
 
     let min = min_responses_version();
     Err(std::io::Error::other(format!(
-        "Ollama {version} is too old. Codex requires Ollama {min} or newer."
+        "Ollama {version} is too old. The Responses API requires Ollama {min} or newer."
     )))
 }
 

@@ -28,8 +28,8 @@ use tokio::time::sleep;
 const START_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const START_TIMEOUT: Duration = Duration::from_secs(10);
 const OPERATION_LOCK_TIMEOUT: Duration = Duration::from_secs(75);
-const PID_FILE_NAME: &str = "app-server.pid";
-const UPDATE_PID_FILE_NAME: &str = "app-server-updater.pid";
+const PID_FILE_NAME: &str = "aren.pid";
+const UPDATE_PID_FILE_NAME: &str = "aren-updater.pid";
 const OPERATION_LOCK_FILE_NAME: &str = "daemon.lock";
 const SETTINGS_FILE_NAME: &str = "settings.json";
 const STATE_DIR_NAME: &str = "app-server-daemon";
@@ -266,7 +266,7 @@ struct Daemon {
 
 impl Daemon {
     fn from_environment() -> Result<Self> {
-        let codex_home = find_codex_home().context("failed to resolve CODEX_HOME")?;
+        let codex_home = find_codex_home().context("failed to resolve AREN_HOME")?;
         let socket_path = app_server_control_socket_path(codex_home.as_path())?
             .as_path()
             .to_path_buf();
@@ -955,7 +955,7 @@ mod tests {
             pid: None,
             managed_codex_path: "codex".into(),
             managed_codex_version: Some("1.2.3".to_string()),
-            socket_path: "codex.sock".into(),
+            socket_path: "aren.sock".into(),
             cli_version: Some("1.2.3".to_string()),
             app_server_version: Some("1.2.4".to_string()),
         };
@@ -968,7 +968,7 @@ mod tests {
                 "backend": "pid",
                 "managedCodexPath": "codex",
                 "managedCodexVersion": "1.2.3",
-                "socketPath": "codex.sock",
+                "socketPath": "aren.sock",
                 "cliVersion": "1.2.3",
                 "appServerVersion": "1.2.4",
             })
@@ -985,7 +985,7 @@ mod tests {
             remote_control_enabled: true,
             managed_codex_path: "codex".into(),
             managed_codex_version: Some("1.2.3".to_string()),
-            socket_path: "codex.sock".into(),
+            socket_path: "aren.sock".into(),
             cli_version: "1.2.3".to_string(),
             app_server_version: "1.2.4".to_string(),
         };
@@ -1000,7 +1000,7 @@ mod tests {
                 "remoteControlEnabled": true,
                 "managedCodexPath": "codex",
                 "managedCodexVersion": "1.2.3",
-                "socketPath": "codex.sock",
+                "socketPath": "aren.sock",
                 "cliVersion": "1.2.3",
                 "appServerVersion": "1.2.4",
             })
@@ -1015,9 +1015,9 @@ mod tests {
     async fn not_ready_context_reports_daemon_app_server_before_stderr() {
         let temp_dir = TempDir::new().expect("temp dir");
         let daemon = Daemon {
-            socket_path: temp_dir.path().join("app-server-control.sock"),
-            pid_file: temp_dir.path().join("app-server.pid"),
-            update_pid_file: temp_dir.path().join("app-server-updater.pid"),
+            socket_path: temp_dir.path().join("aren.sock"),
+            pid_file: temp_dir.path().join("aren.pid"),
+            update_pid_file: temp_dir.path().join("aren-updater.pid"),
             operation_lock_file: temp_dir.path().join("daemon.lock"),
             settings_file: temp_dir.path().join("settings.json"),
             managed_codex_bin: temp_dir.path().join("missing-codex"),

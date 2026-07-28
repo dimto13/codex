@@ -1,5 +1,6 @@
 use clap::Args;
 use clap::CommandFactory;
+use clap::FromArgMatches;
 use clap::Parser;
 use clap_complete::Shell;
 use clap_complete::generate;
@@ -35,9 +36,14 @@ use codex_tui::UpdateAction;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_cli::CliConfigOverrides;
 use codex_utils_cli::ProfileV2Name;
+use codex_utils_cli::SandboxModeCliArg;
 use codex_utils_cli::SharedCliOptions;
+use codex_utils_oss::AREN_DEFAULT_OLLAMA_MODEL;
+use codex_utils_oss::AREN_DEFAULT_OSS_PROVIDER;
+use codex_utils_oss::AREN_VERSION;
 use owo_colors::OwoColorize;
 use std::collections::HashSet;
+use std::ffi::OsStr;
 use std::io::IsTerminal;
 use std::io::Write;
 use std::path::PathBuf;
@@ -50,6 +56,7 @@ mod app_cmd;
 mod desktop_app;
 mod doctor;
 mod exec_server_telemetry;
+mod interactive_search;
 mod marketplace_cmd;
 mod mcp_cmd;
 mod plugin_cmd;
@@ -128,6 +135,10 @@ enum Subcommand {
 
     /// Run a code review non-interactively.
     Review(ReviewCommand),
+
+    /// Run a headless interactive session with web search enabled.
+    #[clap(name = "interactive-search")]
+    InteractiveSearch(InteractiveSearchCommand),
 
     /// Manage login.
     Login(LoginCommand),
@@ -216,6 +227,20 @@ struct CompletionCommand {
     /// Shell to generate completions for
     #[clap(value_enum, default_value_t = Shell::Bash)]
     shell: Shell,
+}
+
+#[derive(Debug, Parser)]
+struct InteractiveSearchCommand {
+    /// Print structured output as JSON.
+    #[arg(long = "json", default_value_t = false)]
+    json: bool,
+
+    /// Timeout for the session in seconds.
+    #[arg(long = "timeout", value_name = "SECONDS")]
+    timeout: Option<u64>,
+
+    #[clap(flatten)]
+    interactive: TuiCli,
 }
 
 #[derive(Debug, Parser)]
@@ -431,7 +456,7 @@ type HostSandboxArgs = UnsupportedSandboxArgs;
 #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
 #[derive(Debug, Parser)]
 struct UnsupportedSandboxArgs {
-    /// Layer $CODEX_HOME/<name>.config.toml on top of the base user config.
+    /// Layer $AREN_HOME/<name>.config.toml on top of the base user config.
     #[arg(long = "profile", short = 'p')]
     pub config_profile: Option<ProfileV2Name>,
 
@@ -748,7 +773,11 @@ fn handle_app_exit(exit_info: AppExitInfo) -> anyhow::Result<()> {
         std::process::exit(1);
     }
     if let Some(action) = update_action {
-        run_update_action(action)?;
+        if current_invocation_is_aren() {
+            run_aren_update_command()?;
+        } else {
+            run_update_action(action)?;
+        }
     }
     Ok(())
 }
@@ -797,6 +826,10 @@ fn run_update_action(action: UpdateAction) -> anyhow::Result<()> {
 }
 
 fn run_update_command() -> anyhow::Result<()> {
+    if current_invocation_is_aren() {
+        return run_aren_update_command();
+    }
+
     #[cfg(debug_assertions)]
     {
         anyhow::bail!(
@@ -813,6 +846,32 @@ fn run_update_command() -> anyhow::Result<()> {
         };
         run_update_action(action)
     }
+}
+
+fn run_aren_update_command() -> anyhow::Result<()> {
+    println!("Updating Aren via `aren-update`...");
+    #[cfg(windows)]
+    let status = {
+        let parent_process_id = std::process::id().to_string();
+        std::process::Command::new("cmd")
+            .args([
+                "/C",
+                "aren-update",
+                "-ParentProcessId",
+                parent_process_id.as_str(),
+            ])
+            .status()
+            .map_err(|error| anyhow::anyhow!("failed to start `aren-update`: {error}"))?
+    };
+    #[cfg(not(windows))]
+    let status = std::process::Command::new("aren-update")
+        .status()
+        .map_err(|error| anyhow::anyhow!("failed to start `aren-update`: {error}"))?;
+    if !status.success() {
+        anyhow::bail!("`aren-update` failed with status {status}");
+    }
+    println!("\nAren was updated successfully. Please restart Aren.");
+    Ok(())
 }
 
 fn run_execpolicycheck(cmd: ExecPolicyCheckCommand) -> anyhow::Result<()> {
@@ -961,6 +1020,56 @@ fn main() -> anyhow::Result<()> {
     })
 }
 
+fn multitool_command_for_invocation(arg0: Option<&OsStr>) -> clap::Command {
+    let command = MultitoolCli::command();
+    if invocation_name_is_aren(arg0) {
+        command
+            .name("aren")
+            .bin_name("aren")
+            .about("Aren CLI")
+            .long_about(None)
+            .version(AREN_VERSION)
+            .override_usage("aren [OPTIONS] [PROMPT]\n       aren [OPTIONS] <COMMAND> [ARGS]")
+    } else {
+        command
+    }
+}
+
+fn invocation_name_is_aren(arg0: Option<&OsStr>) -> bool {
+    arg0.and_then(|value| std::path::Path::new(value).file_stem())
+        .and_then(OsStr::to_str)
+        .is_some_and(|name| name.eq_ignore_ascii_case("aren"))
+}
+
+fn current_invocation_is_aren() -> bool {
+    invocation_name_is_aren(std::env::args_os().next().as_deref())
+}
+
+fn apply_aren_interactive_defaults(interactive: &mut TuiCli) {
+    interactive.oss = true;
+    interactive
+        .oss_provider
+        .get_or_insert_with(|| AREN_DEFAULT_OSS_PROVIDER.to_string());
+    interactive
+        .model
+        .get_or_insert_with(|| AREN_DEFAULT_OLLAMA_MODEL.to_string());
+
+    if !interactive.dangerously_bypass_approvals_and_sandbox {
+        interactive
+            .sandbox_mode
+            .get_or_insert(SandboxModeCliArg::DangerFullAccess);
+        interactive
+            .approval_policy
+            .get_or_insert(codex_utils_cli::ApprovalModeCliArg::Never);
+    }
+}
+
+fn parse_multitool_cli() -> MultitoolCli {
+    let arg0 = std::env::args_os().next();
+    let matches = multitool_command_for_invocation(arg0.as_deref()).get_matches();
+    MultitoolCli::from_arg_matches(&matches).unwrap_or_else(|error| error.exit())
+}
+
 async fn cli_main(
     arg0_paths: Arg0DispatchPaths,
     remote_control_disabled: bool,
@@ -971,11 +1080,14 @@ async fn cli_main(
         remote,
         mut interactive,
         subcommand,
-    } = MultitoolCli::parse();
+    } = parse_multitool_cli();
 
     // Fold --enable/--disable into config overrides so they flow to all subcommands.
     let toggle_overrides = feature_toggles.to_overrides()?;
     root_config_overrides.raw_overrides.extend(toggle_overrides);
+    if current_invocation_is_aren() {
+        apply_aren_interactive_defaults(&mut interactive);
+    }
     let root_remote = remote.remote;
     let root_remote_auth_token_env = remote.remote_auth_token_env;
     let root_strict_config = interactive.strict_config;
@@ -1035,6 +1147,26 @@ async fn cli_main(
                 root_config_overrides.clone(),
             );
             codex_exec::run_main(exec_cli, arg0_paths.clone()).await?;
+        }
+        Some(Subcommand::InteractiveSearch(search_cli)) => {
+            reject_remote_mode_for_subcommand(
+                root_remote.as_deref(),
+                root_remote_auth_token_env.as_deref(),
+                "interactive-search",
+            )?;
+            let mut interactive = search_cli.interactive;
+            interactive.strict_config |= root_strict_config;
+            prepend_config_flags(
+                &mut interactive.config_overrides,
+                root_config_overrides.clone(),
+            );
+            interactive_search::run_interactive_search(
+                interactive,
+                search_cli.json,
+                search_cli.timeout,
+                arg0_paths.clone(),
+            )
+            .await?;
         }
         Some(Subcommand::McpServer(McpServerCommand { strict_config })) => {
             reject_remote_mode_for_subcommand(
@@ -1658,6 +1790,7 @@ fn profile_v2_for_subcommand<'a>(
     match subcommand {
         Subcommand::Exec(_)
         | Subcommand::Review(_)
+        | Subcommand::InteractiveSearch(_)
         | Subcommand::Resume(_)
         | Subcommand::Archive(_)
         | Subcommand::Delete(_)
@@ -1669,7 +1802,7 @@ fn profile_v2_for_subcommand<'a>(
             subcommand: DebugSubcommand::PromptInput(_),
         }) => Ok(Some(profile_v2)),
         _ => anyhow::bail!(
-            "--profile only applies to runtime commands and `codex mcp`: `codex`, `codex exec`, `codex review`, `codex resume`, `codex archive`, `codex delete`, `codex unarchive`, `codex fork`, `codex mcp`, `codex sandbox`, and `codex debug prompt-input`."
+            "--profile only applies to runtime commands and `codex mcp`: `codex`, `codex exec`, `codex review`, `codex interactive-search`, `codex resume`, `codex archive`, `codex delete`, `codex unarchive`, `codex fork`, `codex mcp`, `codex sandbox`, and `codex debug prompt-input`."
         ),
     }
 }
@@ -2109,6 +2242,7 @@ fn unsupported_subcommand_name_for_strict_config(
         None
         | Some(Subcommand::Exec(_))
         | Some(Subcommand::Review(_))
+        | Some(Subcommand::InteractiveSearch(_))
         | Some(Subcommand::McpServer(_))
         | Some(Subcommand::ExecServer(_))
         | Some(Subcommand::Resume(_))
@@ -2663,6 +2797,18 @@ mod tests {
     #[test]
     fn profile_v2_is_allowed_for_runtime_subcommands() {
         assert_eq!(
+            profile_v2_for_args(&[
+                "codex",
+                "--profile",
+                "work",
+                "interactive-search",
+                "research"
+            ])
+            .expect("interactive-search supports profile-v2")
+            .as_deref(),
+            Some("work")
+        );
+        assert_eq!(
             profile_v2_for_args(&["codex", "--profile", "work", "resume"])
                 .expect("resume supports profile-v2")
                 .as_deref(),
@@ -2694,6 +2840,31 @@ mod tests {
 
         assert!(cli.subcommand.is_none());
         assert_eq!(cli.interactive.prompt.as_deref(), Some("import"));
+    }
+
+    #[test]
+    fn interactive_search_parses_ollama_options() {
+        let cli = MultitoolCli::try_parse_from([
+            "codex",
+            "interactive-search",
+            "--json",
+            "--timeout",
+            "30",
+            "--oss",
+            "--local-provider",
+            "ollama",
+            "research this",
+        ])
+        .expect("parse interactive-search");
+
+        let Some(Subcommand::InteractiveSearch(command)) = cli.subcommand else {
+            panic!("expected interactive-search subcommand");
+        };
+        assert!(command.json);
+        assert_eq!(command.timeout, Some(30));
+        assert!(command.interactive.oss);
+        assert_eq!(command.interactive.oss_provider.as_deref(), Some("ollama"));
+        assert_eq!(command.interactive.prompt.as_deref(), Some("research this"));
     }
 
     #[test]
@@ -2919,6 +3090,82 @@ mod tests {
     fn update_parses_as_update_subcommand() {
         let cli = MultitoolCli::try_parse_from(["codex", "update"]).expect("parse");
         assert!(matches!(cli.subcommand, Some(Subcommand::Update)));
+    }
+
+    #[test]
+    fn aren_invocation_uses_aren_branding() {
+        let command = multitool_command_for_invocation(Some(OsStr::new("/home/user/bin/aren")));
+        assert_eq!(command.get_name(), "aren");
+        assert_eq!(
+            command.get_about().map(ToString::to_string).as_deref(),
+            Some("Aren CLI")
+        );
+        assert_eq!(command.get_long_about(), None);
+        assert!(invocation_name_is_aren(Some(OsStr::new(
+            "C:/Users/user/bin/AREN.EXE"
+        ))));
+        assert!(!invocation_name_is_aren(Some(OsStr::new(
+            "/usr/local/bin/codex"
+        ))));
+
+        let Err(error) = command.try_get_matches_from(["aren", "--version"]) else {
+            panic!("--version should short-circuit parsing");
+        };
+        assert_eq!(error.to_string(), format!("aren {AREN_VERSION}\n"));
+    }
+
+    #[test]
+    fn aren_invocation_defaults_to_local_gemma_with_full_access() {
+        let mut interactive = TuiCli::try_parse_from(["aren"]).expect("parse");
+
+        apply_aren_interactive_defaults(&mut interactive);
+
+        assert!(interactive.oss);
+        assert_eq!(
+            interactive.oss_provider.as_deref(),
+            Some(AREN_DEFAULT_OSS_PROVIDER)
+        );
+        assert_eq!(
+            interactive.model.as_deref(),
+            Some(AREN_DEFAULT_OLLAMA_MODEL)
+        );
+        assert!(matches!(
+            interactive.sandbox_mode,
+            Some(SandboxModeCliArg::DangerFullAccess)
+        ));
+        assert!(matches!(
+            interactive.approval_policy,
+            Some(codex_utils_cli::ApprovalModeCliArg::Never)
+        ));
+    }
+
+    #[test]
+    fn aren_invocation_preserves_explicit_runtime_choices() {
+        let mut interactive = TuiCli::try_parse_from([
+            "aren",
+            "--local-provider",
+            "lmstudio",
+            "--model",
+            "local-model",
+            "--sandbox",
+            "read-only",
+            "--ask-for-approval",
+            "on-request",
+        ])
+        .expect("parse");
+
+        apply_aren_interactive_defaults(&mut interactive);
+
+        assert_eq!(interactive.oss_provider.as_deref(), Some("lmstudio"));
+        assert_eq!(interactive.model.as_deref(), Some("local-model"));
+        assert!(matches!(
+            interactive.sandbox_mode,
+            Some(SandboxModeCliArg::ReadOnly)
+        ));
+        assert!(matches!(
+            interactive.approval_policy,
+            Some(codex_utils_cli::ApprovalModeCliArg::OnRequest)
+        ));
     }
 
     #[test]
@@ -3603,9 +3850,9 @@ mod tests {
 
     #[test]
     fn remote_flag_parses_for_interactive_root() {
-        let cli = MultitoolCli::try_parse_from(["codex", "--remote", "unix://codex.sock"])
-            .expect("parse");
-        assert_eq!(cli.remote.remote.as_deref(), Some("unix://codex.sock"));
+        let cli =
+            MultitoolCli::try_parse_from(["codex", "--remote", "unix://aren.sock"]).expect("parse");
+        assert_eq!(cli.remote.remote.as_deref(), Some("unix://aren.sock"));
     }
 
     #[test]
@@ -3626,15 +3873,14 @@ mod tests {
 
     #[test]
     fn remote_flag_parses_for_resume_subcommand() {
-        let cli =
-            MultitoolCli::try_parse_from(["codex", "resume", "--remote", "unix://codex.sock"])
-                .expect("parse");
+        let cli = MultitoolCli::try_parse_from(["codex", "resume", "--remote", "unix://aren.sock"])
+            .expect("parse");
         let Subcommand::Resume(ResumeCommand { remote, .. }) =
             cli.subcommand.expect("resume present")
         else {
             panic!("expected resume subcommand");
         };
-        assert_eq!(remote.remote.as_deref(), Some("unix://codex.sock"));
+        assert_eq!(remote.remote.as_deref(), Some("unix://aren.sock"));
     }
 
     #[test]
@@ -3765,12 +4011,12 @@ mod tests {
     #[test]
     fn app_server_listen_unix_socket_path_parses() {
         let app_server = app_server_from_args(
-            ["codex", "app-server", "--listen", "unix:///tmp/codex.sock"].as_ref(),
+            ["codex", "app-server", "--listen", "unix:///tmp/aren.sock"].as_ref(),
         );
         assert_eq!(
             app_server.listen,
             codex_app_server::AppServerTransport::UnixSocket {
-                socket_path: AbsolutePathBuf::from_absolute_path("/tmp/codex.sock")
+                socket_path: AbsolutePathBuf::from_absolute_path("/tmp/aren.sock")
                     .expect("absolute path should parse")
             }
         );
@@ -3867,14 +4113,14 @@ mod tests {
     #[test]
     fn app_server_proxy_sock_path_parses() {
         let app_server =
-            app_server_from_args(["codex", "app-server", "proxy", "--sock", "codex.sock"].as_ref());
+            app_server_from_args(["codex", "app-server", "proxy", "--sock", "aren.sock"].as_ref());
         let Some(AppServerSubcommand::Proxy(proxy)) = app_server.subcommand else {
             panic!("expected proxy subcommand");
         };
         assert_eq!(
             proxy.socket_path,
             Some(
-                AbsolutePathBuf::relative_to_current_dir("codex.sock")
+                AbsolutePathBuf::relative_to_current_dir("aren.sock")
                     .expect("relative path should resolve")
             )
         );

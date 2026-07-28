@@ -146,7 +146,7 @@ pub struct TestAppServer {
     json_logs: JsonLogCapture,
     codex_home: PathBuf,
     // Fields drop in declaration order. Tear down the delayed child before
-    // removing an owned CODEX_HOME that may still be its cwd on Windows.
+    // removing an owned AREN_HOME that may still be its cwd on Windows.
     _delayed_exec_server: Option<(LocalWebsocketExecServer, WebsocketDelayInterposer)>,
     _owned_codex_home: Option<TempDir>,
 }
@@ -157,7 +157,7 @@ const DISABLE_MANAGED_CONFIG_ENV_VAR: &str = "CODEX_APP_SERVER_DISABLE_MANAGED_C
 const CODE_MODE_HOST_PATH_ENV_VAR: &str = "CODEX_CODE_MODE_HOST_PATH";
 
 impl TestAppServer {
-    /// Starts building a server with a temporary CODEX_HOME and the standard
+    /// Starts building a server with a temporary AREN_HOME and the standard
     /// automatic test environment.
     pub fn builder() -> TestAppServerBuilder {
         TestAppServerBuilder {
@@ -195,7 +195,7 @@ impl TestAppServer {
         })
     }
 
-    /// Returns the effective CODEX_HOME used by the child app-server.
+    /// Returns the effective AREN_HOME used by the child app-server.
     pub fn codex_home(&self) -> &Path {
         &self.codex_home
     }
@@ -234,7 +234,7 @@ impl TestAppServer {
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
         cmd.current_dir(codex_home);
-        cmd.env("CODEX_HOME", codex_home);
+        cmd.env("AREN_HOME", codex_home);
         cmd.env("RUST_LOG", "warn");
         // Keep integration tests isolated from host managed configuration.
         cmd.env(
@@ -1710,7 +1710,7 @@ enum TestAppServerEnvironment {
 }
 
 impl TestAppServerBuilder {
-    /// Uses this existing CODEX_HOME instead of a temporary one.
+    /// Uses this existing AREN_HOME instead of a temporary one.
     pub fn with_codex_home(mut self, codex_home: &Path) -> Self {
         self.codex_home = Some(codex_home.to_path_buf());
         self
@@ -1778,7 +1778,7 @@ impl TestAppServerBuilder {
         self
     }
 
-    /// Builds a server with a temporary CODEX_HOME and automatic environment
+    /// Builds a server with a temporary AREN_HOME and automatic environment
     /// by default.
     pub async fn build(self) -> anyhow::Result<TestAppServer> {
         let Self {

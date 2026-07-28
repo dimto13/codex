@@ -1,0 +1,10 @@
+---
+source: tui/src/history_cell/tests.rs
+expression: rendered
+---
+╭────────────────────────────────────────────────╮
+│ >_ Aren (vtest)                                │
+│                                                │
+│ model:     gpt-oss:20b high   /model to change │
+│ directory: /tmp/project                        │
+╰────────────────────────────────────────────────╯

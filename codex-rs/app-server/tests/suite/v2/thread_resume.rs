@@ -771,7 +771,7 @@ async fn goal_first_live_thread_appears_in_state_db_thread_list() -> Result<()> 
     let mut mcp = TestAppServer::builder()
         .with_codex_home(&codex_home_path)
         .without_managed_config()
-        .with_env_overrides(&[("CODEX_SQLITE_HOME", Some(sqlite_home))])
+        .with_env_overrides(&[("AREN_SQLITE_HOME", Some(sqlite_home))])
         .build()
         .await?;
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;

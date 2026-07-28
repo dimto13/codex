@@ -65,6 +65,17 @@ fn system_bwrap_warning_for_path(system_bwrap_path: Option<&Path>) -> Option<Str
     };
 
     if !system_bwrap_has_user_namespace_access(system_bwrap_path, SYSTEM_BWRAP_PROBE_TIMEOUT) {
+        if std::env::args_os()
+            .next()
+            .as_deref()
+            .and_then(|value| Path::new(value).file_name())
+            .is_some_and(|name| name == "aren")
+        {
+            return Some(
+                "Aren's Linux sandbox uses bubblewrap and needs access to create user namespaces."
+                    .to_string(),
+            );
+        }
         return Some(USER_NAMESPACE_WARNING.to_string());
     }
 

@@ -2,8 +2,19 @@
 
 use codex_protocol::ThreadId;
 use codex_shell_command::parse_command::shlex_join;
+use std::ffi::OsStr;
+use std::path::Path;
 
 pub fn resume_command(thread_name: Option<&str>, thread_id: Option<ThreadId>) -> Option<String> {
+    resume_command_for_cli(current_cli_name(), thread_name, thread_id)
+}
+
+/// Formats a resume command using the user-facing CLI name supplied by the caller.
+pub fn resume_command_for_cli(
+    cli_name: &str,
+    thread_name: Option<&str>,
+    thread_id: Option<ThreadId>,
+) -> Option<String> {
     let resume_target = thread_name
         .filter(|name| !name.is_empty())
         .map(str::to_string)
@@ -12,20 +23,44 @@ pub fn resume_command(thread_name: Option<&str>, thread_id: Option<ThreadId>) ->
         let needs_double_dash = target.starts_with('-');
         let escaped = shlex_join(&[target]);
         if needs_double_dash {
-            format!("codex resume -- {escaped}")
+            format!("{cli_name} resume -- {escaped}")
         } else {
-            format!("codex resume {escaped}")
+            format!("{cli_name} resume {escaped}")
         }
     })
 }
 
 pub fn resume_hint(thread_name: Option<&str>, thread_id: Option<ThreadId>) -> Option<String> {
+    resume_hint_for_cli(current_cli_name(), thread_name, thread_id)
+}
+
+/// Formats a resume hint using the user-facing CLI name supplied by the caller.
+pub fn resume_hint_for_cli(
+    cli_name: &str,
+    thread_name: Option<&str>,
+    thread_id: Option<ThreadId>,
+) -> Option<String> {
     let thread_id = thread_id?;
     match thread_name.filter(|name| !name.is_empty()) {
         Some(thread_name) => Some(format!(
-            "codex resume, then select {thread_name} ({thread_id})"
+            "{cli_name} resume, then select {thread_name} ({thread_id})"
         )),
-        None => resume_command(/*thread_name*/ None, Some(thread_id)),
+        None => resume_command_for_cli(cli_name, /*thread_name*/ None, Some(thread_id)),
+    }
+}
+
+fn current_cli_name() -> &'static str {
+    cli_name_for_arg0(std::env::args_os().next().as_deref())
+}
+
+fn cli_name_for_arg0(arg0: Option<&OsStr>) -> &'static str {
+    if arg0
+        .and_then(|value| Path::new(value).file_name())
+        .is_some_and(|name| name == "aren")
+    {
+        "aren"
+    } else {
+        "codex"
     }
 }
 
@@ -99,5 +134,33 @@ mod tests {
     fn resume_hint_requires_thread_id() {
         let hint = resume_hint(Some("my-thread"), /*thread_id*/ None);
         assert_eq!(hint, None);
+    }
+
+    #[test]
+    fn formats_aren_resume_commands() {
+        let thread_id = ThreadId::from_string("123e4567-e89b-12d3-a456-426614174000").unwrap();
+        assert_eq!(
+            resume_command_for_cli("aren", /*thread_name*/ None, Some(thread_id)),
+            Some("aren resume 123e4567-e89b-12d3-a456-426614174000".to_string())
+        );
+        assert_eq!(
+            resume_hint_for_cli("aren", Some("my-thread"), Some(thread_id)),
+            Some(
+                "aren resume, then select my-thread (123e4567-e89b-12d3-a456-426614174000)"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn detects_aren_cli_name_from_arg0() {
+        assert_eq!(
+            cli_name_for_arg0(Some(OsStr::new("/usr/local/bin/aren"))),
+            "aren"
+        );
+        assert_eq!(
+            cli_name_for_arg0(Some(OsStr::new("/usr/local/bin/codex"))),
+            "codex"
+        );
     }
 }

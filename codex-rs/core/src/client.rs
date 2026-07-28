@@ -107,15 +107,28 @@ use tracing::instrument;
 use tracing::trace;
 use tracing::warn;
 
+const FORCE_FIRST_TOOL_CALL_METADATA_KEY: &str = "aren_force_first_tool_call";
+const INTERACTIVE_SEARCH_METADATA_KEY: &str = "aren_interactive_search";
+const INTERACTIVE_SEARCH_INITIAL_CHROME_TOOLS: [&str; 2] = [
+    "mcp__chrome_devtools__new_page",
+    "mcp__chrome_devtools__navigate_page",
+];
+
 use crate::attestation::AttestationContext;
 use crate::attestation::AttestationProvider;
 use crate::attestation::X_OAI_ATTESTATION_HEADER;
 use crate::client_common::Prompt;
 use crate::client_common::ResponseEvent;
 use crate::client_common::ResponseStream;
+use crate::context::OssToolRouting;
+use crate::context::apply_oss_turn_reminder;
+use crate::context::latest_user_request_text;
+use crate::context::oss_tool_routing;
 use crate::feedback_tags;
 use crate::responses_metadata::CodexResponsesMetadata;
 use crate::responses_metadata::subagent_header_value;
+use crate::tools::oss_request_tool_selection::McpToolSelectionMode;
+use crate::tools::oss_request_tool_selection::select_oss_request_tools;
 use crate::util::emit_feedback_auth_recovery_tags;
 use codex_feedback::FeedbackRequestTags;
 use codex_feedback::emit_feedback_request_tags_with_auth_env;
@@ -169,6 +182,45 @@ pub(crate) struct CompactConversationRequestSettings {
     pub(crate) effort: Option<ReasoningEffortConfig>,
     pub(crate) summary: ReasoningSummaryConfig,
     pub(crate) service_tier: Option<String>,
+}
+
+fn tool_choice_for_request(
+    prompt: &Prompt,
+    responses_metadata: &CodexResponsesMetadata,
+    oss_tool_routing: OssToolRouting,
+) -> &'static str {
+    let force_first_tool_call = responses_metadata
+        .extra
+        .get(FORCE_FIRST_TOOL_CALL_METADATA_KEY)
+        .is_some_and(|value| value == "true");
+    let interactive_search_requires_chrome = responses_metadata
+        .extra
+        .get(INTERACTIVE_SEARCH_METADATA_KEY)
+        .is_some_and(|value| value == "true")
+        && prompt
+            .tools
+            .iter()
+            .any(|tool| INTERACTIVE_SEARCH_INITIAL_CHROME_TOOLS.contains(&tool.name()))
+        && !last_input_is_tool_output(prompt);
+    if matches!(oss_tool_routing, OssToolRouting::Require(_))
+        || interactive_search_requires_chrome
+        || (force_first_tool_call && !prompt.tools.is_empty() && !last_input_is_tool_output(prompt))
+    {
+        "required"
+    } else {
+        "auto"
+    }
+}
+
+fn last_input_is_tool_output(prompt: &Prompt) -> bool {
+    prompt.input.last().is_some_and(|item| {
+        matches!(
+            item,
+            ResponseItem::FunctionCallOutput { .. }
+                | ResponseItem::CustomToolCallOutput { .. }
+                | ResponseItem::ToolSearchOutput { .. }
+        )
+    })
 }
 
 fn reasoning_effort_for_request(effort: ReasoningEffortConfig) -> ReasoningEffortConfig {
@@ -838,7 +890,63 @@ impl ModelClient {
                 .iter_mut()
                 .for_each(ResponseItem::clear_internal_chat_message_metadata_passthrough);
         }
-        let tools = create_tools_json_for_responses_api(&prompt.tools)?;
+        let is_oss = self.state.provider.info().is_oss();
+        let latest_user_request = is_oss.then(|| latest_user_request_text(&input)).flatten();
+        let mut oss_tool_routing = if is_oss {
+            oss_tool_routing(&input)
+        } else {
+            OssToolRouting::Default
+        };
+        if is_oss && let Some(current_date) = prompt.current_date.as_deref() {
+            apply_oss_turn_reminder(&mut input, current_date);
+        }
+        let interactive_search = responses_metadata
+            .extra
+            .get(INTERACTIVE_SEARCH_METADATA_KEY)
+            .is_some_and(|value| value == "true");
+        let selected_oss_tools = (is_oss && matches!(oss_tool_routing, OssToolRouting::Default))
+            .then(|| {
+                let mode = if interactive_search {
+                    McpToolSelectionMode::InteractiveSearch
+                } else {
+                    McpToolSelectionMode::Default
+                };
+                select_oss_request_tools(
+                    latest_user_request.as_deref(),
+                    prompt.tools.as_slice(),
+                    mode,
+                )
+            });
+        let initial_interactive_search_chrome_tool = (interactive_search
+            && !last_input_is_tool_output(prompt))
+        .then(|| {
+            INTERACTIVE_SEARCH_INITIAL_CHROME_TOOLS
+                .iter()
+                .find_map(|name| prompt.tools.iter().find(|tool| tool.name() == *name))
+                .cloned()
+        })
+        .flatten()
+        .map(|tool| vec![tool]);
+        let request_tools =
+            if let Some(chrome_tools) = initial_interactive_search_chrome_tool.as_deref() {
+                chrome_tools
+            } else {
+                match oss_tool_routing {
+                    OssToolRouting::Default => selected_oss_tools
+                        .as_deref()
+                        .unwrap_or(prompt.tools.as_slice()),
+                    OssToolRouting::Require(name) => {
+                        if let Some(tool) = prompt.tools.iter().find(|tool| tool.name() == name) {
+                            std::slice::from_ref(tool)
+                        } else {
+                            oss_tool_routing = OssToolRouting::Default;
+                            prompt.tools.as_slice()
+                        }
+                    }
+                    OssToolRouting::Suppress => &[],
+                }
+            };
+        let tools = create_tools_json_for_responses_api(request_tools)?;
         let (instructions, tools) = if model_info.use_responses_lite {
             let mut prefix = vec![ResponseItem::AdditionalTools {
                 id: None,
@@ -892,7 +1000,8 @@ impl ModelClient {
             instructions,
             input,
             tools,
-            tool_choice: "auto".to_string(),
+            tool_choice: tool_choice_for_request(prompt, responses_metadata, oss_tool_routing)
+                .to_string(),
             parallel_tool_calls: prompt.parallel_tool_calls && !model_info.use_responses_lite,
             reasoning: Some(reasoning),
             store: provider.is_azure_responses_endpoint(),

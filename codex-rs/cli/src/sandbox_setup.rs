@@ -34,7 +34,7 @@ pub(crate) struct SandboxSetupCommand {
     )]
     current_user: bool,
 
-    /// CODEX_HOME for the Codex user. Required with --user.
+    /// AREN_HOME for the Codex user. Required with --user.
     #[arg(long = "codex-home", value_name = "DIR")]
     codex_home: Option<PathBuf>,
 }
@@ -150,7 +150,7 @@ mod tests {
             "--user",
             "DOMAIN\\alice",
             "--codex-home",
-            r"C:\Users\alice\.codex",
+            r"C:\Users\alice\.aren",
         ])
         .expect("parse");
 
@@ -159,7 +159,7 @@ mod tests {
         assert!(!command.current_user);
         assert_eq!(
             command.codex_home.as_deref(),
-            Some(std::path::Path::new(r"C:\Users\alice\.codex"))
+            Some(std::path::Path::new(r"C:\Users\alice\.aren"))
         );
     }
 
@@ -188,7 +188,7 @@ mod tests {
             "--user".to_string(),
             r"DOMAIN\alice".to_string(),
             "--codex-home".to_string(),
-            r"C:\Users\alice\.codex".to_string(),
+            r"C:\Users\alice\.aren".to_string(),
         ])
         .expect("parse")
         .expect("setup command");

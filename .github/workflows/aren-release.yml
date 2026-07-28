@@ -1,0 +1,321 @@
+name: aren-release
+
+on:
+  push:
+    tags:
+      - "aren-v*"
+  workflow_dispatch:
+
+concurrency:
+  group: aren-release-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+  # The upstream release profile uses Thin-LTO and needs substantially more
+  # memory than a standard GitHub-hosted runner.
+  CARGO_PROFILE_RELEASE_LTO: "false"
+  CARGO_PROFILE_RELEASE_DEBUG: "none"
+  CARGO_PROFILE_RELEASE_STRIP: "symbols"
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+  CARGO_BUILD_JOBS: "2"
+
+jobs:
+  build-linux:
+    name: Build Aren for ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: codex-rs
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x86_64
+            runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - platform: linux-aarch64
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update -y
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            binutils \
+            libcap-dev \
+            pkg-config
+
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+
+      - name: Configure pinned rusty_v8 artifacts
+        uses: ./.github/actions/setup-rusty-v8
+        with:
+          target: ${{ matrix.target }}
+
+      - name: Resolve Aren release metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" == refs/tags/aren-v* ]]; then
+            release_name="${GITHUB_REF_NAME}"
+            aren_version="${GITHUB_REF_NAME#aren-v}"
+          else
+            release_name="aren-manual-${GITHUB_SHA:0:12}"
+            aren_version="0.0.0-dev.${GITHUB_SHA:0:12}"
+          fi
+          [[ "${aren_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]]
+          echo "AREN_VERSION=${aren_version}" >> "${GITHUB_ENV}"
+          echo "RELEASE_NAME=${release_name}" >> "${GITHUB_ENV}"
+
+      - name: Build Aren
+        run: cargo build --locked --release -p codex-cli --bin codex
+
+      - name: Package and smoke-test Aren
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          archive_name="aren-${PLATFORM}.tar.gz"
+          package_dir="../dist/package-${PLATFORM}"
+          mkdir -p "${package_dir}"
+          install -m 0755 target/release/codex "${package_dir}/aren"
+          install -m 0755 ../scripts/update-aren.sh "${package_dir}/aren-update"
+
+          printf '%s\n' \
+            "release=${RELEASE_NAME}" \
+            "version=${AREN_VERSION}" \
+            "commit=${GITHUB_SHA}" \
+            "github_run=${GITHUB_RUN_ID}" \
+            "built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            "target=${{ matrix.target }}" \
+            > "${package_dir}/BUILD-INFO.txt"
+
+          [[ "$("${package_dir}/aren" --version)" == "aren ${AREN_VERSION}" ]]
+          "${package_dir}/aren" interactive-search --help >/dev/null
+          "${package_dir}/aren-update" --help >/dev/null
+
+          tar -C "${package_dir}" -czf "../dist/${archive_name}" \
+            aren aren-update BUILD-INFO.txt
+          (
+            cd ../dist
+            sha256sum "${archive_name}" > "${archive_name}.sha256"
+          )
+          install -m 0755 "${package_dir}/aren" "../dist/aren-${PLATFORM}"
+          cp "${package_dir}/BUILD-INFO.txt" "../dist/BUILD-INFO-${PLATFORM}.txt"
+
+      - name: Upload Linux release payload
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: aren-${{ matrix.platform }}
+          path: |
+            dist/aren-${{ matrix.platform }}.tar.gz
+            dist/aren-${{ matrix.platform }}.tar.gz.sha256
+            dist/aren-${{ matrix.platform }}
+            dist/BUILD-INFO-${{ matrix.platform }}.txt
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload Unix updater
+        if: matrix.platform == 'linux-x86_64'
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: aren-updater-unix
+          path: scripts/update-aren.sh
+          if-no-files-found: error
+          retention-days: 7
+
+  build-windows:
+    name: Build Aren for windows-x86_64
+    runs-on: windows-latest
+    timeout-minutes: 180
+    defaults:
+      run:
+        working-directory: codex-rs
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-ci
+
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Configure LLVM linker
+        uses: ./.github/actions/setup-msvc-env
+        with:
+          target: x86_64-pc-windows-msvc
+
+      - name: Resolve Aren release metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" == refs/tags/aren-v* ]]; then
+            release_name="${GITHUB_REF_NAME}"
+            aren_version="${GITHUB_REF_NAME#aren-v}"
+          else
+            release_name="aren-manual-${GITHUB_SHA:0:12}"
+            aren_version="0.0.0-dev.${GITHUB_SHA:0:12}"
+          fi
+          [[ "${aren_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]]
+          echo "AREN_VERSION=${aren_version}" >> "${GITHUB_ENV}"
+          echo "RELEASE_NAME=${release_name}" >> "${GITHUB_ENV}"
+
+      - name: Build Aren
+        shell: bash
+        run: |
+          export LIBSQLITE3_FLAGS=SQLITE_DISABLE_INTRINSIC
+          cargo build \
+            --locked \
+            --target x86_64-pc-windows-msvc \
+            --release \
+            -p codex-cli \
+            --bin codex
+
+      - name: Package and smoke-test Aren
+        shell: pwsh
+        run: |
+          $releaseDir = Join-Path $env:CARGO_TARGET_DIR "x86_64-pc-windows-msvc\release"
+          $distDir = Join-Path $env:GITHUB_WORKSPACE "dist"
+          $packageDir = Join-Path $distDir "package-windows-x86_64"
+          $archiveName = "aren-windows-x86_64.zip"
+          New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
+          Copy-Item (Join-Path $releaseDir "codex.exe") (Join-Path $packageDir "aren.exe")
+          Copy-Item (Join-Path $env:GITHUB_WORKSPACE "scripts\update-aren.ps1") $packageDir
+          Copy-Item (Join-Path $env:GITHUB_WORKSPACE "scripts\update-aren.cmd") $packageDir
+
+          @(
+            "release=$env:RELEASE_NAME"
+            "version=$env:AREN_VERSION"
+            "commit=$env:GITHUB_SHA"
+            "github_run=$env:GITHUB_RUN_ID"
+            "built_at=$([DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'))"
+            "target=x86_64-pc-windows-msvc"
+          ) | Set-Content -Encoding ascii (Join-Path $packageDir "BUILD-INFO.txt")
+
+          $versionOutput = & (Join-Path $packageDir "aren.exe") --version
+          if ($versionOutput -ne "aren $env:AREN_VERSION") {
+            throw "Unexpected Aren version: $versionOutput"
+          }
+          & (Join-Path $packageDir "aren.exe") interactive-search --help | Out-Null
+          & (Join-Path $packageDir "aren-update.ps1") -Help | Out-Null
+
+          $archivePath = Join-Path $distDir $archiveName
+          Compress-Archive -Path (Join-Path $packageDir "*") -DestinationPath $archivePath
+          $checksum = (Get-FileHash -Algorithm SHA256 $archivePath).Hash.ToLowerInvariant()
+          "$checksum  $archiveName" |
+            Set-Content -Encoding ascii (Join-Path $distDir "$archiveName.sha256")
+          Copy-Item (Join-Path $packageDir "aren.exe") (Join-Path $distDir "aren-windows-x86_64.exe")
+          Copy-Item (Join-Path $packageDir "BUILD-INFO.txt") (Join-Path $distDir "BUILD-INFO-windows-x86_64.txt")
+
+      - name: Upload Windows release payload
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: aren-windows-x86_64
+          path: |
+            dist/aren-windows-x86_64.zip
+            dist/aren-windows-x86_64.zip.sha256
+            dist/aren-windows-x86_64.exe
+            dist/BUILD-INFO-windows-x86_64.txt
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload Windows updater
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: aren-updater-windows
+          path: |
+            scripts/update-aren.ps1
+            scripts/update-aren.cmd
+          if-no-files-found: error
+          retention-days: 7
+
+  publish-release:
+    name: Publish Aren GitHub Release
+    needs:
+      - build-linux
+      - build-windows
+    if: startsWith(github.ref, 'refs/tags/aren-v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download verified build payloads
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: aren-*
+          merge-multiple: true
+          path: dist
+
+      - name: Verify release payload
+        run: |
+          set -euo pipefail
+          (
+            cd dist
+            sha256sum --check ./*.sha256
+          )
+
+          verify_dir="${RUNNER_TEMP}/aren-release-verify"
+          mkdir -p "${verify_dir}/linux-x86_64" "${verify_dir}/linux-aarch64" "${verify_dir}/windows-x86_64"
+          tar -C "${verify_dir}/linux-x86_64" -xzf dist/aren-linux-x86_64.tar.gz
+          tar -C "${verify_dir}/linux-aarch64" -xzf dist/aren-linux-aarch64.tar.gz
+          unzip -q dist/aren-windows-x86_64.zip -d "${verify_dir}/windows-x86_64"
+
+          for platform in linux-x86_64 linux-aarch64 windows-x86_64; do
+            grep -Fx "release=${GITHUB_REF_NAME}" "dist/BUILD-INFO-${platform}.txt"
+            grep -Fx "version=${GITHUB_REF_NAME#aren-v}" "dist/BUILD-INFO-${platform}.txt"
+            grep -Fx "commit=${GITHUB_SHA}" "dist/BUILD-INFO-${platform}.txt"
+          done
+
+          chmod 0755 "${verify_dir}/linux-x86_64/aren"
+          [[ "$("${verify_dir}/linux-x86_64/aren" --version)" == "aren ${GITHUB_REF_NAME#aren-v}" ]]
+          "${verify_dir}/linux-x86_64/aren" interactive-search --help >/dev/null
+          test -x "${verify_dir}/linux-x86_64/aren-update"
+          test -x "${verify_dir}/linux-aarch64/aren-update"
+          test -f "${verify_dir}/windows-x86_64/aren-update.ps1"
+          test -f "${verify_dir}/windows-x86_64/aren-update.cmd"
+
+          cp dist/update-aren.sh dist/aren-update
+          cp dist/update-aren.ps1 dist/aren-update.ps1
+          cp dist/update-aren.cmd dist/aren-update.cmd
+          chmod 0755 dist/aren-update
+
+      - name: Publish immutable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --verify-tag \
+            --title "Aren ${GITHUB_REF_NAME#aren-v}" \
+            --generate-notes \
+            dist/aren-linux-x86_64.tar.gz \
+            dist/aren-linux-x86_64.tar.gz.sha256 \
+            dist/aren-linux-x86_64 \
+            dist/BUILD-INFO-linux-x86_64.txt \
+            dist/aren-linux-aarch64.tar.gz \
+            dist/aren-linux-aarch64.tar.gz.sha256 \
+            dist/aren-linux-aarch64 \
+            dist/BUILD-INFO-linux-aarch64.txt \
+            dist/aren-windows-x86_64.zip \
+            dist/aren-windows-x86_64.zip.sha256 \
+            dist/aren-windows-x86_64.exe \
+            dist/BUILD-INFO-windows-x86_64.txt \
+            dist/aren-update \
+            dist/aren-update.ps1 \
+            dist/aren-update.cmd

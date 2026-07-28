@@ -888,9 +888,15 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mu
     )
 )]
 fn add_mcp_runtime_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut PlannedTools) {
+    let handler_for_tool = if namespace_tools_enabled(context.step_context.turn.as_ref()) {
+        McpHandler::new
+    } else {
+        McpHandler::new_flattened
+    };
+
     if let Some(mcp_tools) = context.mcp_tools {
         for tool in mcp_tools {
-            match McpHandler::new(tool.clone()) {
+            match handler_for_tool(tool.clone()) {
                 Ok(handler) => planned_tools.add(handler),
                 Err(err) => warn!(
                     "Skipping MCP tool `{}`: failed to build tool spec: {err}",
@@ -902,7 +908,7 @@ fn add_mcp_runtime_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut 
 
     if let Some(deferred_mcp_tools) = context.deferred_mcp_tools {
         for tool in deferred_mcp_tools {
-            match McpHandler::new(tool.clone()) {
+            match handler_for_tool(tool.clone()) {
                 Ok(handler) => planned_tools.add_with_exposure(handler, ToolExposure::Deferred),
                 Err(err) => warn!(
                     "Skipping deferred MCP tool `{}`: failed to build tool spec: {err}",

@@ -70,6 +70,7 @@ pub(super) async fn run_remote_compact_attempt(
         tools: tool_router.model_visible_specs(),
         parallel_tool_calls: turn_context.model_info.supports_parallel_tool_calls,
         base_instructions,
+        current_date: None,
         output_schema: None,
         output_schema_strict: true,
     };

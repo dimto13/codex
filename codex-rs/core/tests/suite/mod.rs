@@ -83,6 +83,7 @@ mod multi_agent_mode;
 mod multi_agent_resume;
 mod network_approval;
 mod openai_file_mcp;
+mod oss_turn_compatibility;
 mod otel;
 mod override_updates;
 mod pending_input;

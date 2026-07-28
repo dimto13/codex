@@ -1549,6 +1549,21 @@ fn session_header_includes_reasoning_level_when_present() {
 }
 
 #[test]
+fn session_header_uses_aren_branding_when_requested() {
+    let cell = SessionHeaderHistoryCell::new(
+        "gpt-oss:20b".to_string(),
+        Some(ReasoningEffortConfig::High),
+        /*show_fast_status*/ false,
+        test_path_buf("/tmp/project").abs().to_path_buf(),
+        "test",
+    )
+    .with_brand(crate::brand::AppBrand::Aren);
+
+    let rendered = render_lines(&cell.display_lines(/*width*/ 80)).join("\n");
+    insta::assert_snapshot!(rendered);
+}
+
+#[test]
 fn session_header_hides_fast_status_when_disabled() {
     let cell = SessionHeaderHistoryCell::new(
         "gpt-4o".to_string(),

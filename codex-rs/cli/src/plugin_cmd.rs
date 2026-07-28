@@ -585,7 +585,7 @@ struct PluginCommandContext {
 async fn load_plugin_command_context(
     overrides: Vec<(String, toml::Value)>,
 ) -> Result<PluginCommandContext> {
-    let codex_home = find_codex_home().context("failed to resolve CODEX_HOME")?;
+    let codex_home = find_codex_home().context("failed to resolve AREN_HOME")?;
     let config = Config::load_with_cli_overrides(overrides)
         .await
         .context("failed to load configuration")?;
@@ -847,7 +847,7 @@ fn is_implicit_system_marketplace_root(
         && path_ends_with(
             root,
             &[
-                "codex-runtimes",
+                "aren-runtimes",
                 "codex-primary-runtime",
                 "plugins",
                 marketplace_name,
