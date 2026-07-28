@@ -19,15 +19,13 @@ use codex_model_provider_info::WireApi;
 #[cfg(test)]
 use codex_model_provider_info::create_oss_provider_with_base_url;
 
-const OLLAMA_CONNECTION_ERROR: &str = "No running Ollama server detected. Start it with: `ollama serve` (after installing). Install instructions: https://github.com/ollama/ollama?tab=readme-ov-file#ollama";
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OllamaModelMetadata {
     pub capabilities: Vec<String>,
     pub context_window: Option<i64>,
 }
 
-/// Client for interacting with a local Ollama instance.
+/// Client for interacting with a configured Ollama instance.
 pub struct OllamaClient {
     client: reqwest::Client,
     host_root: String,
@@ -36,7 +34,7 @@ pub struct OllamaClient {
 
 impl OllamaClient {
     /// Construct a client for the built‑in open‑source ("oss") model provider
-    /// and verify that a local Ollama server is reachable. If no server is
+    /// and verify that the configured Ollama server is reachable. If no server is
     /// detected, returns an error with helpful installation/run instructions.
     pub async fn try_from_oss_provider(config: &Config) -> io::Result<Self> {
         // Note that we must look up the provider from the Config to ensure that
@@ -92,7 +90,7 @@ impl OllamaClient {
         };
         let resp = self.client.get(url).send().await.map_err(|err| {
             tracing::warn!("Failed to connect to Ollama server: {err:?}");
-            io::Error::other(OLLAMA_CONNECTION_ERROR)
+            self.connection_error()
         })?;
         if resp.status().is_success() {
             Ok(())
@@ -102,11 +100,18 @@ impl OllamaClient {
                 self.host_root,
                 resp.status()
             );
-            Err(io::Error::other(OLLAMA_CONNECTION_ERROR))
+            Err(self.connection_error())
         }
     }
 
-    /// Return the list of model names known to the local Ollama instance.
+    fn connection_error(&self) -> io::Error {
+        io::Error::other(format!(
+            "Cannot reach Ollama at {}. Check that the server is running and that its bind address and firewall allow this connection.",
+            self.host_root
+        ))
+    }
+
+    /// Return the list of model names known to the configured Ollama instance.
     pub async fn fetch_models(&self) -> io::Result<Vec<String>> {
         let tags_url = format!("{}/api/tags", self.host_root.trim_end_matches('/'));
         let resp = self
@@ -552,6 +557,12 @@ mod tests {
             .await
             .err()
             .expect("expected error");
-        assert_eq!(OLLAMA_CONNECTION_ERROR, err.to_string());
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "Cannot reach Ollama at {}. Check that the server is running and that its bind address and firewall allow this connection.",
+                server.uri()
+            )
+        );
     }
 }

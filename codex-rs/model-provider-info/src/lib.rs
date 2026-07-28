@@ -436,6 +436,25 @@ const LMSTUDIO_PROVIDER_NAME: &str = "LM Studio";
 pub const LMSTUDIO_OSS_PROVIDER_ID: &str = "lmstudio";
 pub const OLLAMA_OSS_PROVIDER_ID: &str = "ollama";
 
+#[derive(Default)]
+struct OssProviderEnvironment {
+    aren_ollama_base_url: Option<String>,
+    ollama_host: Option<String>,
+    legacy_base_url: Option<String>,
+    legacy_port: Option<String>,
+}
+
+impl OssProviderEnvironment {
+    fn from_process() -> Self {
+        Self {
+            aren_ollama_base_url: std::env::var("AREN_OLLAMA_BASE_URL").ok(),
+            ollama_host: std::env::var("OLLAMA_HOST").ok(),
+            legacy_base_url: std::env::var("CODEX_OSS_BASE_URL").ok(),
+            legacy_port: std::env::var("CODEX_OSS_PORT").ok(),
+        }
+    }
+}
+
 /// Built-in default provider list.
 pub fn built_in_model_providers(
     openai_base_url: Option<String>,
@@ -504,21 +523,48 @@ pub fn merge_configured_model_providers(
 }
 
 pub fn create_oss_provider(default_provider_port: u16, wire_api: WireApi) -> ModelProviderInfo {
+    create_oss_provider_with_environment(
+        default_provider_port,
+        wire_api,
+        OssProviderEnvironment::from_process(),
+    )
+}
+
+fn create_oss_provider_with_environment(
+    default_provider_port: u16,
+    wire_api: WireApi,
+    environment: OssProviderEnvironment,
+) -> ModelProviderInfo {
     // These CODEX_OSS_ environment variables are experimental: we may
     // switch to reading values from config.toml instead.
     let default_codex_oss_base_url = format!(
         "http://localhost:{codex_oss_port}/v1",
-        codex_oss_port = std::env::var("CODEX_OSS_PORT")
-            .ok()
+        codex_oss_port = environment
+            .legacy_port
+            .as_deref()
             .filter(|value| !value.trim().is_empty())
             .and_then(|value| value.parse::<u16>().ok())
             .unwrap_or(default_provider_port)
     );
 
-    let codex_oss_base_url = std::env::var("CODEX_OSS_BASE_URL")
-        .ok()
-        .filter(|v| !v.trim().is_empty())
-        .unwrap_or(default_codex_oss_base_url);
+    let legacy_base_url = environment
+        .legacy_base_url
+        .filter(|value| !value.trim().is_empty());
+    let codex_oss_base_url = if default_provider_port == DEFAULT_OLLAMA_PORT {
+        environment
+            .aren_ollama_base_url
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| {
+                environment
+                    .ollama_host
+                    .filter(|value| !value.trim().is_empty())
+            })
+            .map(|value| normalize_ollama_base_url(&value))
+            .or(legacy_base_url)
+            .unwrap_or(default_codex_oss_base_url)
+    } else {
+        legacy_base_url.unwrap_or(default_codex_oss_base_url)
+    };
     let mut provider = create_oss_provider_with_base_url(&codex_oss_base_url, wire_api);
     provider.name = match default_provider_port {
         DEFAULT_OLLAMA_PORT => OLLAMA_PROVIDER_NAME,
@@ -527,6 +573,21 @@ pub fn create_oss_provider(default_provider_port: u16, wire_api: WireApi) -> Mod
     }
     .to_string();
     provider
+}
+
+fn normalize_ollama_base_url(base_url: &str) -> String {
+    let base_url = base_url.trim().trim_end_matches('/');
+    let base_url = if base_url.contains("://") {
+        base_url.to_string()
+    } else {
+        format!("http://{base_url}")
+    };
+
+    if base_url.ends_with("/v1") {
+        base_url
+    } else {
+        format!("{base_url}/v1")
+    }
 }
 
 pub fn create_oss_provider_with_base_url(base_url: &str, wire_api: WireApi) -> ModelProviderInfo {

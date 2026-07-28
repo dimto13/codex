@@ -15,8 +15,12 @@ installation.
   5. `core-plugins`: Cache-Pfad `aren-runtimes`.
 - [x] Standard-Modellauswahl: `gemma4:e4b` mit hohem Reasoning-Aufwand.
 - [x] Standard-Berechtigungen: voller Zugriff ohne Sandbox und Rückfragen.
+- [x] `/permissions` wirkt auch bei lokalen Modellen ohne künstliche
+  „Soll ich fortfahren?“- oder `go`-Zwischenstopps weiter.
 - [x] Ein einfacher Aufruf von `aren` aktiviert automatisch OSS, Ollama und die
   oben genannten Standardwerte; zusätzliche Startparameter sind nicht nötig.
+- [x] Aren kann Ollama wahlweise lokal oder über
+  `AREN_OLLAMA_BASE_URL` auf einem leistungsfähigeren Rechner im LAN nutzen.
 - [x] Allgemeine lokale Anfragen zu Dateien, Systemzustand und Git werden mit
   den vorhandenen Shell-Werkzeugen gelöst; große MCP-/App-Werkzeugkataloge
   werden pro Anfrage relevant gefiltert statt durch Einzelfall-Skripte ersetzt.
@@ -64,12 +68,55 @@ Füge anschließend `$HOME\.local\bin` dauerhaft zum Benutzer-`PATH` hinzu.
 
 ## Erster Start
 
-Auf jedem Rechner muss Ollama laufen und das Standardmodell vorhanden sein:
+Bei lokaler Inferenz muss Ollama auf demselben Rechner laufen und das
+Standardmodell vorhanden sein:
 
 ```shell
 ollama pull gemma4:e4b
 aren
 ```
+
+## Ollama auf einem anderen Rechner im LAN
+
+Auf dem Ollama-Rechner muss der Dienst auf einer LAN-Adresse lauschen. Unter
+Linux mit systemd kann dafür beispielsweise `systemctl edit ollama.service`
+verwendet werden:
+
+```ini
+[Service]
+Environment="OLLAMA_HOST=0.0.0.0:11434"
+```
+
+Danach den Dienst neu starten, `gemma4:e4b` dort installieren und Port 11434 in
+der Firewall ausschließlich für das vertrauenswürdige lokale Netz freigeben.
+Auf einem Linux- oder macOS-Rechner mit Aren genügt dann:
+
+```shell
+export AREN_OLLAMA_BASE_URL="http://192.168.1.25:11434"
+aren
+```
+
+Unter Windows kann die Adresse für den aktuellen PowerShell-Prozess oder
+dauerhaft für das Benutzerkonto gesetzt werden:
+
+```powershell
+$env:AREN_OLLAMA_BASE_URL = "http://192.168.1.25:11434"
+[Environment]::SetEnvironmentVariable(
+  "AREN_OLLAMA_BASE_URL",
+  "http://192.168.1.25:11434",
+  "User"
+)
+aren
+```
+
+Aren akzeptiert auch `192.168.1.25:11434` oder eine bereits mit `/v1`
+abgeschlossene URL. `OLLAMA_HOST` wird als Fallback ebenfalls erkannt. Für eine
+dauerhafte Einrichtung unter Linux oder macOS wird `AREN_OLLAMA_BASE_URL` in
+das Shell-Profil eingetragen. Ollamas HTTP-Schnittstelle bietet selbst keine
+Transportverschlüsselung; außerhalb eines vertrauenswürdigen LANs sollte sie
+nur über einen abgesicherten Reverse-Proxy oder VPN erreichbar sein. Weitere
+Hinweise stehen in Ollamas
+[Netzwerk-Dokumentation](https://docs.ollama.com/faq#how-can-i-expose-ollama-on-my-network).
 
 Ein späteres Update installiert automatisch das neueste stabile Release:
 
