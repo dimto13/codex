@@ -27,3 +27,24 @@ async fn dismiss_version_creates_cache_file_when_missing() {
         ("999.0.0", Some("999.0.0"))
     );
 }
+
+#[tokio::test]
+async fn aren_and_codex_use_separate_update_caches() {
+    let codex_home = tempdir().expect("temp codex home");
+    let config = ConfigBuilder::default()
+        .codex_home(codex_home.path().to_path_buf())
+        .build()
+        .await
+        .expect("load config");
+
+    assert_eq!(
+        (
+            version_filepath_for_brand(&config, crate::brand::AppBrand::Aren),
+            version_filepath_for_brand(&config, crate::brand::AppBrand::Codex),
+        ),
+        (
+            codex_home.path().join("aren-version.json"),
+            codex_home.path().join("version.json"),
+        )
+    );
+}

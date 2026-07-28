@@ -188,7 +188,7 @@ mod tui;
 mod ui_consts;
 pub(crate) mod update_action;
 pub use update_action::UpdateAction;
-#[cfg(not(debug_assertions))]
+#[cfg(any(not(debug_assertions), test))]
 pub use update_action::get_update_action;
 mod update_prompt;
 #[cfg(any(not(debug_assertions), test))]

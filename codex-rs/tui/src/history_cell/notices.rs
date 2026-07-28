@@ -23,6 +23,10 @@ impl HistoryCell for UpdateAvailableHistoryCell {
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         use ratatui_macros::line;
         use ratatui_macros::text;
+        let release_notes_url = self
+            .update_action
+            .map(UpdateAction::release_notes_url)
+            .unwrap_or("https://github.com/openai/codex/releases/latest");
         let update_instruction = if let Some(update_action) = self.update_action {
             line!["Run ", update_action.command_str().cyan(), " to update."]
         } else {
@@ -43,9 +47,7 @@ impl HistoryCell for UpdateAvailableHistoryCell {
             update_instruction,
             "",
             "See full release notes:",
-            "https://github.com/openai/codex/releases/latest"
-                .cyan()
-                .underlined(),
+            release_notes_url.cyan().underlined(),
         ];
 
         let inner_width = content
@@ -57,6 +59,10 @@ impl HistoryCell for UpdateAvailableHistoryCell {
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {
+        let release_notes_url = self
+            .update_action
+            .map(UpdateAction::release_notes_url)
+            .unwrap_or("https://github.com/openai/codex/releases/latest");
         let update_instruction = if let Some(update_action) = self.update_action {
             format!("Run {} to update.", update_action.command_str())
         } else {
@@ -68,7 +74,7 @@ impl HistoryCell for UpdateAvailableHistoryCell {
             Line::from(update_instruction),
             Line::from(""),
             Line::from("See full release notes:"),
-            Line::from("https://github.com/openai/codex/releases/latest"),
+            Line::from(release_notes_url),
         ]
     }
 

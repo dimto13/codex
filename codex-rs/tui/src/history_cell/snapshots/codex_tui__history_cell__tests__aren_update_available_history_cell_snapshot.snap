@@ -1,0 +1,11 @@
+---
+source: tui/src/history_cell/tests.rs
+expression: rendered
+---
+╭──────────────────────────────────────────────────╮
+│ ✨ Update available! 0.0.0 -> 9.9.9              │
+│ Run aren update to update.                       │
+│                                                  │
+│ See full release notes:                          │
+│ https://github.com/dimto13/codex/releases/latest │
+╰──────────────────────────────────────────────────╯

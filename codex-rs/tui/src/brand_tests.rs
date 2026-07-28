@@ -7,6 +7,10 @@ fn detects_aren_from_executable_name() {
         AppBrand::from_arg0(Some(OsStr::new("/usr/local/bin/aren"))),
         AppBrand::Aren
     );
+    assert_eq!(
+        AppBrand::from_arg0(Some(OsStr::new("C:/Users/user/bin/AREN.EXE"))),
+        AppBrand::Aren
+    );
 }
 
 #[test]

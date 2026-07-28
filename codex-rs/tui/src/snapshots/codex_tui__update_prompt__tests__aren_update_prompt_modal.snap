@@ -1,0 +1,14 @@
+---
+source: tui/src/update_prompt.rs
+expression: rendered
+---
+
+  ✨ Update available! 0.0.0 -> 9.9.9
+
+  Release notes: https://github.com/dimto13/codex/releases/latest
+
+› 1. Update now (runs `aren update`)
+  2. Skip
+  3. Skip until next version
+
+  Press enter to continue

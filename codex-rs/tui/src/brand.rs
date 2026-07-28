@@ -14,8 +14,9 @@ impl AppBrand {
 
     pub(crate) fn from_arg0(arg0: Option<&OsStr>) -> Self {
         if arg0
-            .and_then(|value| Path::new(value).file_name())
-            .is_some_and(|name| name == "aren")
+            .and_then(|value| Path::new(value).file_stem())
+            .and_then(OsStr::to_str)
+            .is_some_and(|name| name.eq_ignore_ascii_case("aren"))
         {
             Self::Aren
         } else {

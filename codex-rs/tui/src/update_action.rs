@@ -8,6 +8,8 @@ use codex_install_context::StandalonePlatform;
 /// Update action the CLI should perform after the TUI exits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UpdateAction {
+    /// Update via the Aren release updater installed alongside the Aren binary.
+    Aren,
     /// Update via `npm install -g @openai/codex@latest`.
     NpmGlobalLatest,
     /// Update via `bun install -g @openai/codex@latest`.
@@ -41,9 +43,10 @@ impl UpdateAction {
     /// Returns the list of command-line arguments for invoking the update.
     pub fn command_args(self) -> (&'static str, &'static [&'static str]) {
         match self {
-            UpdateAction::NpmGlobalLatest => ("npm", &["install", "-g", "@openai/codex"]),
-            UpdateAction::BunGlobalLatest => ("bun", &["install", "-g", "@openai/codex"]),
-            UpdateAction::PnpmGlobalLatest => ("pnpm", &["add", "-g", "@openai/codex"]),
+            UpdateAction::Aren => ("aren", &["update"]),
+            UpdateAction::NpmGlobalLatest => ("npm", &["install", "-g", "@openai/codex@latest"]),
+            UpdateAction::BunGlobalLatest => ("bun", &["install", "-g", "@openai/codex@latest"]),
+            UpdateAction::PnpmGlobalLatest => ("pnpm", &["add", "-g", "@openai/codex@latest"]),
             UpdateAction::BrewUpgrade => ("brew", &["upgrade", "--cask", "codex"]),
             UpdateAction::StandaloneUnix => (
                 "sh",
@@ -70,11 +73,27 @@ impl UpdateAction {
         shlex::try_join(std::iter::once(command).chain(args.iter().copied()))
             .unwrap_or_else(|_| format!("{command} {}", args.join(" ")))
     }
+
+    pub(crate) fn release_notes_url(self) -> &'static str {
+        match self {
+            UpdateAction::Aren => "https://github.com/dimto13/codex/releases/latest",
+            UpdateAction::NpmGlobalLatest
+            | UpdateAction::BunGlobalLatest
+            | UpdateAction::PnpmGlobalLatest
+            | UpdateAction::BrewUpgrade
+            | UpdateAction::StandaloneUnix
+            | UpdateAction::StandaloneWindows => "https://github.com/openai/codex/releases/latest",
+        }
+    }
 }
 
-#[cfg(not(debug_assertions))]
+#[cfg(any(not(debug_assertions), test))]
 pub fn get_update_action() -> Option<UpdateAction> {
-    UpdateAction::from_install_context(InstallContext::current())
+    if crate::brand::AppBrand::current().is_aren() {
+        Some(UpdateAction::Aren)
+    } else {
+        UpdateAction::from_install_context(InstallContext::current())
+    }
 }
 
 #[cfg(test)]
@@ -171,6 +190,15 @@ mod tests {
                     "$env:CODEX_NON_INTERACTIVE=1; irm https://chatgpt.com/codex/install.ps1 | iex"
                 ][..],
             )
+        );
+    }
+
+    #[test]
+    fn aren_update_uses_only_the_aren_updater_and_release_page() {
+        assert_eq!(UpdateAction::Aren.command_args(), ("aren", &["update"][..]));
+        assert_eq!(
+            UpdateAction::Aren.release_notes_url(),
+            "https://github.com/dimto13/codex/releases/latest"
         );
     }
 }

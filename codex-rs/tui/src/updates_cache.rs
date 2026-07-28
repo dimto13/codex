@@ -15,10 +15,19 @@ pub(crate) struct VersionInfo {
     pub(crate) dismissed_version: Option<String>,
 }
 
-const VERSION_FILENAME: &str = "version.json";
+const CODEX_VERSION_FILENAME: &str = "version.json";
+const AREN_VERSION_FILENAME: &str = "aren-version.json";
 
 pub(crate) fn version_filepath(config: &Config) -> PathBuf {
-    config.codex_home.join(VERSION_FILENAME).into_path_buf()
+    version_filepath_for_brand(config, crate::brand::AppBrand::current())
+}
+
+fn version_filepath_for_brand(config: &Config, brand: crate::brand::AppBrand) -> PathBuf {
+    let filename = match brand {
+        crate::brand::AppBrand::Codex => CODEX_VERSION_FILENAME,
+        crate::brand::AppBrand::Aren => AREN_VERSION_FILENAME,
+    };
+    config.codex_home.join(filename).into_path_buf()
 }
 
 pub(crate) fn read_version_info(version_file: &Path) -> anyhow::Result<VersionInfo> {
