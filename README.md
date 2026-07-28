@@ -1,8 +1,91 @@
-<p align="center"><strong>Aren</strong> is a local-first coding agent powered by Ollama.</p>
+<p align="center"><strong>Aren</strong> ist ein lokaler Coding-Agent mit Ollama als Modell-Backend.</p>
 
-Aren is based on the open-source Codex CLI but keeps its configuration,
-credentials, sessions and local-model defaults separate from an official Codex
-installation.
+Aren verwendet eigene Konfigurations-, Sitzungs- und Zugangsdaten unter
+`~/.aren`. Eine einfache `aren`-Eingabe startet die TUI mit Ollama,
+`gemma4:e4b`, hohem Reasoning-Aufwand und vollem lokalem Zugriff.
+
+# Quickstart
+
+## Linux
+
+Unterstützt werden Linux x86_64 und Linux ARM64. Diese Befehle laden den
+Updater aus dem neuesten GitHub-Release, prüfen anschließend automatisch die
+SHA-256-Prüfsumme des passenden Aren-Pakets und installieren `aren`:
+
+```shell
+mkdir -p "$HOME/.local/bin"
+curl -fsSL \
+  https://github.com/dimto13/codex/releases/latest/download/aren-update \
+  -o "$HOME/.local/bin/aren-update"
+chmod 0755 "$HOME/.local/bin/aren-update"
+export PATH="$HOME/.local/bin:$PATH"
+aren-update
+aren --version
+```
+
+Trage `export PATH="$HOME/.local/bin:$PATH"` dauerhaft in dein Shell-Profil
+ein, beispielsweise in `~/.bashrc` oder `~/.zshrc`.
+
+## Windows
+
+In PowerShell auf Windows x86_64:
+
+```powershell
+$installDir = Join-Path $HOME ".local\bin"
+New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+Invoke-WebRequest `
+  https://github.com/dimto13/codex/releases/latest/download/aren-update.ps1 `
+  -OutFile (Join-Path $installDir "aren-update.ps1")
+Invoke-WebRequest `
+  https://github.com/dimto13/codex/releases/latest/download/aren-update.cmd `
+  -OutFile (Join-Path $installDir "aren-update.cmd")
+& (Join-Path $installDir "aren-update.ps1")
+& (Join-Path $installDir "aren.exe") --version
+```
+
+Füge `$HOME\.local\bin` anschließend dauerhaft zum Benutzer-`PATH` hinzu.
+
+## Alternativ aus einem Git-Checkout bauen
+
+Der GitHub-Release ist der empfohlene Installationsweg. Für einen eigenen
+Build aus dem aktuellen `main`-Branch werden eine Rust-Toolchain und die in der
+[Build-Anleitung](docs/install.md) genannten Systempakete benötigt:
+
+```shell
+git clone https://github.com/dimto13/codex.git aren-source
+cd aren-source/codex-rs
+aren_version="$(
+  git describe --tags --match 'aren-v*' --abbrev=0 |
+    sed 's/^aren-v//'
+)"
+AREN_VERSION="$aren_version" cargo build --locked --release -p codex-cli --bin codex
+install -Dm0755 target/release/codex "$HOME/.local/bin/aren"
+export PATH="$HOME/.local/bin:$PATH"
+aren --version
+```
+
+## Erster Start
+
+Für lokale Inferenz muss Ollama auf demselben Rechner laufen und das
+Standardmodell vorhanden sein:
+
+```shell
+ollama pull gemma4:e4b
+aren
+```
+
+Für einen Ollama-Server im LAN genügt auf dem Aren-Rechner:
+
+```shell
+export AREN_OLLAMA_BASE_URL="http://192.168.1.25:11434"
+aren
+```
+
+Ein späteres Update installiert automatisch den neuesten stabilen Release:
+
+```shell
+aren update
+```
 
 # Meine Anforderungen
 
@@ -30,53 +113,7 @@ installation.
 - [ ] Versionierte, selbstaktualisierende Releasepakete für Linux x86_64,
   Linux ARM64 und Windows x86_64 sind auf ihren realen GitHub-Runnern geprüft.
 
-# Installation
-
-## Linux
-
-Unterstützt werden Linux x86_64 und Linux ARM64:
-
-```shell
-mkdir -p "$HOME/.local/bin"
-curl -fsSL \
-  https://github.com/dimto13/codex/releases/latest/download/aren-update \
-  -o "$HOME/.local/bin/aren-update"
-chmod 0755 "$HOME/.local/bin/aren-update"
-export PATH="$HOME/.local/bin:$PATH"
-aren-update
-```
-
-Trage `~/.local/bin` dauerhaft in den `PATH` deiner Shell ein.
-
-## Windows
-
-In PowerShell auf Windows x86_64:
-
-```powershell
-$installDir = Join-Path $HOME ".local\bin"
-New-Item -ItemType Directory -Force -Path $installDir | Out-Null
-Invoke-WebRequest `
-  https://github.com/dimto13/codex/releases/latest/download/aren-update.ps1 `
-  -OutFile (Join-Path $installDir "aren-update.ps1")
-Invoke-WebRequest `
-  https://github.com/dimto13/codex/releases/latest/download/aren-update.cmd `
-  -OutFile (Join-Path $installDir "aren-update.cmd")
-& (Join-Path $installDir "aren-update.ps1")
-```
-
-Füge anschließend `$HOME\.local\bin` dauerhaft zum Benutzer-`PATH` hinzu.
-
-## Erster Start
-
-Bei lokaler Inferenz muss Ollama auf demselben Rechner laufen und das
-Standardmodell vorhanden sein:
-
-```shell
-ollama pull gemma4:e4b
-aren
-```
-
-## Ollama auf einem anderen Rechner im LAN
+# Ollama auf einem anderen Rechner im LAN
 
 Auf dem Ollama-Rechner muss der Dienst auf einer LAN-Adresse lauschen. Unter
 Linux mit systemd kann dafür beispielsweise `systemctl edit ollama.service`
@@ -118,12 +155,6 @@ nur über einen abgesicherten Reverse-Proxy oder VPN erreichbar sein. Weitere
 Hinweise stehen in Ollamas
 [Netzwerk-Dokumentation](https://docs.ollama.com/faq#how-can-i-expose-ollama-on-my-network).
 
-Ein späteres Update installiert automatisch das neueste stabile Release:
-
-```shell
-aren update
-```
-
 MCP-Server und persönliche Einstellungen werden absichtlich nicht als
 Releasebestandteil verteilt. Sie liegen getrennt unter `~/.aren/` und müssen
 pro Rechner eingerichtet werden. Insbesondere muss Executor auf dem Zielrechner
@@ -144,8 +175,9 @@ installiert und dort als MCP-Server konfiguriert sein. Zugangsdaten wie
 Ein neues Release wird nach grüner CI aus dem gewünschten Commit erstellt:
 
 ```shell
-git tag -a aren-v0.1.2 -m "Aren 0.1.2"
-git push origin aren-v0.1.2
+version="0.1.4"
+git tag -a "aren-v${version}" -m "Aren ${version}"
+git push origin "aren-v${version}"
 ```
 
 Details, Prüf- und Updatebefehle stehen in
@@ -155,8 +187,8 @@ Details, Prüf- und Updatebefehle stehen in
 
 - `aren-v0.1.1` wurde am 24. Juli 2026 als erstes vollständig geprüftes
   Linux-x86_64-Release veröffentlicht.
-- Aren verwendet real `~/.aren`; die offizielle `codex`-Installation bleibt
-  getrennt und unverändert.
+- Aren verwendet real `~/.aren`; andere CLI-Installationen bleiben getrennt
+  und unverändert.
 - Chrome DevTools MCP läuft headless mit einem isolierten temporären Profil.
 - Die Quick- und Full-Live-Suite prüft reale Webrecherche einschließlich
   Quellenvalidierung.
@@ -167,5 +199,5 @@ Details, Prüf- und Updatebefehle stehen in
 - [Allgemeine Build-Anleitung](docs/install.md)
 - [Mitwirken](docs/contributing.md)
 
-Aren enthält Code aus dem OpenAI-Codex-Projekt und steht wie das
-Ausgangsprojekt unter der [Apache-2.0-Lizenz](LICENSE).
+Aren enthält Code aus einem Open-Source-Ausgangsprojekt und steht weiterhin
+unter der [Apache-2.0-Lizenz](LICENSE).
