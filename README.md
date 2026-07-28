@@ -102,6 +102,9 @@ aren update
   „Soll ich fortfahren?“- oder `go`-Zwischenstopps weiter.
 - [x] Ein einfacher Aufruf von `aren` aktiviert automatisch OSS, Ollama und die
   oben genannten Standardwerte; zusätzliche Startparameter sind nicht nötig.
+- [x] `aren update`, die automatische Updateprüfung und `aren doctor` verwenden
+  ausschließlich Aren-Releases sowie den getrennten Cache
+  `~/.aren/aren-version.json`; Codex-Installationen werden nicht verändert.
 - [x] Aren kann Ollama wahlweise lokal oder über
   `AREN_OLLAMA_BASE_URL` auf einem leistungsfähigeren Rechner im LAN nutzen.
 - [x] Allgemeine lokale Anfragen zu Dateien, Systemzustand und Git werden mit

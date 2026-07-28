@@ -52,6 +52,7 @@ use supports_color::Stream;
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 mod app_cmd;
+mod aren_update;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 mod desktop_app;
 mod doctor;
@@ -774,7 +775,7 @@ fn handle_app_exit(exit_info: AppExitInfo) -> anyhow::Result<()> {
     }
     if let Some(action) = update_action {
         if current_invocation_is_aren() {
-            run_aren_update_command()?;
+            aren_update::run()?;
         } else {
             run_update_action(action)?;
         }
@@ -784,6 +785,10 @@ fn handle_app_exit(exit_info: AppExitInfo) -> anyhow::Result<()> {
 
 /// Run the update action and print the result.
 fn run_update_action(action: UpdateAction) -> anyhow::Result<()> {
+    if action == UpdateAction::Aren {
+        return aren_update::run();
+    }
+
     println!();
     let cmd_str = action.command_str();
     println!("Updating Codex via `{cmd_str}`...");
@@ -827,7 +832,7 @@ fn run_update_action(action: UpdateAction) -> anyhow::Result<()> {
 
 fn run_update_command() -> anyhow::Result<()> {
     if current_invocation_is_aren() {
-        return run_aren_update_command();
+        return aren_update::run();
     }
 
     #[cfg(debug_assertions)]
@@ -846,32 +851,6 @@ fn run_update_command() -> anyhow::Result<()> {
         };
         run_update_action(action)
     }
-}
-
-fn run_aren_update_command() -> anyhow::Result<()> {
-    println!("Updating Aren via `aren-update`...");
-    #[cfg(windows)]
-    let status = {
-        let parent_process_id = std::process::id().to_string();
-        std::process::Command::new("cmd")
-            .args([
-                "/C",
-                "aren-update",
-                "-ParentProcessId",
-                parent_process_id.as_str(),
-            ])
-            .status()
-            .map_err(|error| anyhow::anyhow!("failed to start `aren-update`: {error}"))?
-    };
-    #[cfg(not(windows))]
-    let status = std::process::Command::new("aren-update")
-        .status()
-        .map_err(|error| anyhow::anyhow!("failed to start `aren-update`: {error}"))?;
-    if !status.success() {
-        anyhow::bail!("`aren-update` failed with status {status}");
-    }
-    println!("\nAren was updated successfully. Please restart Aren.");
-    Ok(())
 }
 
 fn run_execpolicycheck(cmd: ExecPolicyCheckCommand) -> anyhow::Result<()> {
@@ -1029,6 +1008,11 @@ fn multitool_command_for_invocation(arg0: Option<&OsStr>) -> clap::Command {
             .about("Aren CLI")
             .long_about(None)
             .version(AREN_VERSION)
+            .mut_subcommand("update", |command| {
+                command
+                    .about("Update Aren to the latest version.")
+                    .long_about(None)
+            })
             .override_usage("aren [OPTIONS] [PROMPT]\n       aren [OPTIONS] <COMMAND> [ARGS]")
     } else {
         command
@@ -3101,6 +3085,16 @@ mod tests {
             Some("Aren CLI")
         );
         assert_eq!(command.get_long_about(), None);
+        let update_command = command
+            .find_subcommand("update")
+            .expect("update subcommand should exist");
+        assert_eq!(
+            update_command
+                .get_about()
+                .map(ToString::to_string)
+                .as_deref(),
+            Some("Update Aren to the latest version.")
+        );
         assert!(invocation_name_is_aren(Some(OsStr::new(
             "C:/Users/user/bin/AREN.EXE"
         ))));

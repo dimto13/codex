@@ -1,4 +1,4 @@
-//! Diagnoses whether Codex update paths target the running installation.
+//! Diagnoses whether product update paths target the running installation.
 //!
 //! Update diagnostics combine cached version metadata, install-channel hints,
 //! and bounded latest-version probes. For npm-managed launches, this module also
@@ -11,6 +11,7 @@ use std::path::Path;
 use codex_core::config::Config;
 use codex_install_context::InstallContext;
 use codex_install_context::InstallMethod;
+use codex_utils_oss::AREN_VERSION;
 use serde::Deserialize;
 
 use super::CheckStatus;
@@ -21,9 +22,57 @@ use super::doctor_managed_by_npm;
 use super::npm_global_root_check;
 use super::run_command;
 
-const VERSION_FILE_NAME: &str = "version.json";
-const GITHUB_LATEST_RELEASE_URL: &str = "https://api.github.com/repos/openai/codex/releases/latest";
+const CODEX_VERSION_FILE_NAME: &str = "version.json";
+const AREN_VERSION_FILE_NAME: &str = "aren-version.json";
+const CODEX_GITHUB_LATEST_RELEASE_URL: &str =
+    "https://api.github.com/repos/openai/codex/releases/latest";
+const AREN_GITHUB_LATEST_RELEASE_URL: &str =
+    "https://api.github.com/repos/dimto13/codex/releases/latest";
 const HOMEBREW_CASK_API_URL: &str = "https://formulae.brew.sh/api/cask/codex.json";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum UpdateProduct {
+    Codex,
+    Aren,
+}
+
+impl UpdateProduct {
+    fn current() -> Self {
+        if crate::current_invocation_is_aren() {
+            Self::Aren
+        } else {
+            Self::Codex
+        }
+    }
+
+    fn version_file_name(self) -> &'static str {
+        match self {
+            Self::Codex => CODEX_VERSION_FILE_NAME,
+            Self::Aren => AREN_VERSION_FILE_NAME,
+        }
+    }
+
+    fn current_version(self) -> &'static str {
+        match self {
+            Self::Codex => env!("CARGO_PKG_VERSION"),
+            Self::Aren => AREN_VERSION,
+        }
+    }
+
+    fn update_action_label(self, context: &InstallContext) -> &'static str {
+        if self == Self::Aren {
+            return "aren update";
+        }
+        match &context.method {
+            InstallMethod::Npm => "npm install -g @openai/codex",
+            InstallMethod::Bun => "bun install -g @openai/codex",
+            InstallMethod::Pnpm => "pnpm add -g @openai/codex",
+            InstallMethod::Brew => "brew upgrade --cask codex",
+            InstallMethod::Standalone { .. } => "standalone installer",
+            InstallMethod::Other => "manual or unknown",
+        }
+    }
+}
 
 /// Builds the update-health row for the current installation.
 ///
@@ -31,6 +80,7 @@ const HOMEBREW_CASK_API_URL: &str = "https://formulae.brew.sh/api/cask/codex.jso
 /// warning instead of failing doctor outright; update freshness is useful
 /// support context but should not mask more direct install/config failures.
 pub(super) fn updates_check(config: &Config) -> DoctorCheck {
+    let product = UpdateProduct::current();
     let current_exe = std::env::current_exe().ok();
     let install_context = doctor_install_context(current_exe.as_deref());
     let mut details = vec![
@@ -38,16 +88,19 @@ pub(super) fn updates_check(config: &Config) -> DoctorCheck {
             "check for update on startup: {}",
             config.check_for_update_on_startup
         ),
-        format!("update action: {}", update_action_label(&install_context)),
+        format!(
+            "update action: {}",
+            product.update_action_label(&install_context)
+        ),
     ];
-    let version_file = config.codex_home.join(VERSION_FILE_NAME);
+    let version_file = config.codex_home.join(product.version_file_name());
     push_cached_version_details(&mut details, &version_file);
 
     let mut status = CheckStatus::Ok;
     let mut summary = "update configuration is locally consistent".to_string();
     let mut remediation = None;
 
-    if doctor_managed_by_npm(current_exe.as_deref()) {
+    if product == UpdateProduct::Codex && doctor_managed_by_npm(current_exe.as_deref()) {
         match npm_global_root_check() {
             NpmRootCheck::Match { package_root } => {
                 details.push(format!("npm update target: {}", package_root.display()));
@@ -85,10 +138,10 @@ pub(super) fn updates_check(config: &Config) -> DoctorCheck {
         }
     }
 
-    match fetch_latest_version(&install_context) {
+    match fetch_latest_version(product, &install_context) {
         Ok(latest_version) => {
             details.push(format!("latest version: {latest_version}"));
-            if is_newer(&latest_version, env!("CARGO_PKG_VERSION")) == Some(true) {
+            if is_newer(&latest_version, product.current_version()) == Some(true) {
                 details.push("latest version status: newer version is available".to_string());
             } else {
                 details.push("latest version status: current version is not older".to_string());
@@ -129,37 +182,34 @@ fn push_cached_version_details(details: &mut Vec<String>, version_file: &Path) {
     }
 }
 
-fn update_action_label(context: &InstallContext) -> &'static str {
-    match &context.method {
-        InstallMethod::Npm => "npm install -g @openai/codex",
-        InstallMethod::Bun => "bun install -g @openai/codex",
-        InstallMethod::Pnpm => "pnpm add -g @openai/codex",
-        InstallMethod::Brew => "brew upgrade --cask codex",
-        InstallMethod::Standalone { .. } => "standalone installer",
-        InstallMethod::Other => "manual or unknown",
+fn fetch_latest_version(
+    product: UpdateProduct,
+    context: &InstallContext,
+) -> Result<String, String> {
+    if product == UpdateProduct::Aren {
+        return fetch_latest_github_release_version(AREN_GITHUB_LATEST_RELEASE_URL, "aren-v");
     }
-}
-
-fn fetch_latest_version(context: &InstallContext) -> Result<String, String> {
     match &context.method {
         InstallMethod::Brew => fetch_homebrew_cask_version(),
         InstallMethod::Npm
         | InstallMethod::Bun
         | InstallMethod::Pnpm
         | InstallMethod::Standalone { .. }
-        | InstallMethod::Other => fetch_latest_github_release_version(),
+        | InstallMethod::Other => {
+            fetch_latest_github_release_version(CODEX_GITHUB_LATEST_RELEASE_URL, "rust-v")
+        }
     }
 }
 
-fn fetch_latest_github_release_version() -> Result<String, String> {
+fn fetch_latest_github_release_version(url: &str, tag_prefix: &str) -> Result<String, String> {
     #[derive(Deserialize)]
     struct ReleaseInfo {
         tag_name: String,
     }
 
-    let info = http_get_json::<ReleaseInfo>(GITHUB_LATEST_RELEASE_URL)?;
+    let info = http_get_json::<ReleaseInfo>(url)?;
     info.tag_name
-        .strip_prefix("rust-v")
+        .strip_prefix(tag_prefix)
         .map(str::to_string)
         .ok_or_else(|| format!("failed to parse latest tag {}", info.tag_name))
 }
@@ -218,26 +268,34 @@ mod tests {
 
     #[test]
     fn update_action_labels_install_contexts() {
+        let product = UpdateProduct::Codex;
         assert_eq!(
-            update_action_label(&InstallContext {
+            product.update_action_label(&InstallContext {
                 method: InstallMethod::Npm,
                 package_layout: None,
             }),
             "npm install -g @openai/codex"
         );
         assert_eq!(
-            update_action_label(&InstallContext {
+            product.update_action_label(&InstallContext {
                 method: InstallMethod::Pnpm,
                 package_layout: None,
             }),
             "pnpm add -g @openai/codex"
         );
         assert_eq!(
-            update_action_label(&InstallContext {
+            product.update_action_label(&InstallContext {
                 method: InstallMethod::Other,
                 package_layout: None,
             }),
             "manual or unknown"
+        );
+        assert_eq!(
+            UpdateProduct::Aren.update_action_label(&InstallContext {
+                method: InstallMethod::Npm,
+                package_layout: None,
+            }),
+            "aren update"
         );
     }
 }

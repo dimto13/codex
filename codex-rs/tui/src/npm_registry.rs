@@ -1,7 +1,8 @@
 use serde::Deserialize;
 use std::collections::HashMap;
 
-#[cfg(not(debug_assertions))]
+#[cfg(any(not(debug_assertions), test))]
+#[cfg_attr(debug_assertions, allow(dead_code))]
 pub(crate) const PACKAGE_URL: &str = "https://registry.npmjs.org/@openai%2fcodex";
 
 #[derive(Deserialize, Debug, Clone)]
