@@ -194,8 +194,12 @@ jobs:
           $archiveName = "aren-windows-x86_64.zip"
           New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
           Copy-Item (Join-Path $releaseDir "codex.exe") (Join-Path $packageDir "aren.exe")
-          Copy-Item (Join-Path $env:GITHUB_WORKSPACE "scripts\update-aren.ps1") $packageDir
-          Copy-Item (Join-Path $env:GITHUB_WORKSPACE "scripts\update-aren.cmd") $packageDir
+          Copy-Item `
+            (Join-Path $env:GITHUB_WORKSPACE "scripts\update-aren.ps1") `
+            (Join-Path $packageDir "aren-update.ps1")
+          Copy-Item `
+            (Join-Path $env:GITHUB_WORKSPACE "scripts\update-aren.cmd") `
+            (Join-Path $packageDir "aren-update.cmd")
 
           @(
             "release=$env:RELEASE_NAME"
