@@ -1026,6 +1026,8 @@ fn multitool_command_for_invocation(arg0: Option<&OsStr>) -> clap::Command {
         command
             .name("aren")
             .bin_name("aren")
+            .about("Aren CLI")
+            .long_about(None)
             .version(AREN_VERSION)
             .override_usage("aren [OPTIONS] [PROMPT]\n       aren [OPTIONS] <COMMAND> [ARGS]")
     } else {
@@ -1034,8 +1036,9 @@ fn multitool_command_for_invocation(arg0: Option<&OsStr>) -> clap::Command {
 }
 
 fn invocation_name_is_aren(arg0: Option<&OsStr>) -> bool {
-    arg0.and_then(|value| std::path::Path::new(value).file_name())
-        .is_some_and(|name| name == "aren")
+    arg0.and_then(|value| std::path::Path::new(value).file_stem())
+        .and_then(OsStr::to_str)
+        .is_some_and(|name| name.eq_ignore_ascii_case("aren"))
 }
 
 fn current_invocation_is_aren() -> bool {
@@ -3093,6 +3096,14 @@ mod tests {
     fn aren_invocation_uses_aren_branding() {
         let command = multitool_command_for_invocation(Some(OsStr::new("/home/user/bin/aren")));
         assert_eq!(command.get_name(), "aren");
+        assert_eq!(
+            command.get_about().map(ToString::to_string).as_deref(),
+            Some("Aren CLI")
+        );
+        assert_eq!(command.get_long_about(), None);
+        assert!(invocation_name_is_aren(Some(OsStr::new(
+            "C:/Users/user/bin/AREN.EXE"
+        ))));
         assert!(!invocation_name_is_aren(Some(OsStr::new(
             "/usr/local/bin/codex"
         ))));
