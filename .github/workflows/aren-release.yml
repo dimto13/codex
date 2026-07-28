@@ -280,9 +280,10 @@ jobs:
           unzip -q dist/aren-windows-x86_64.zip -d "${verify_dir}/windows-x86_64"
 
           for platform in linux-x86_64 linux-aarch64 windows-x86_64; do
-            grep -Fx "release=${GITHUB_REF_NAME}" "dist/BUILD-INFO-${platform}.txt"
-            grep -Fx "version=${GITHUB_REF_NAME#aren-v}" "dist/BUILD-INFO-${platform}.txt"
-            grep -Fx "commit=${GITHUB_SHA}" "dist/BUILD-INFO-${platform}.txt"
+            metadata="$(tr -d '\r' < "dist/BUILD-INFO-${platform}.txt")"
+            grep -Fx "release=${GITHUB_REF_NAME}" <<< "${metadata}"
+            grep -Fx "version=${GITHUB_REF_NAME#aren-v}" <<< "${metadata}"
+            grep -Fx "commit=${GITHUB_SHA}" <<< "${metadata}"
           done
 
           chmod 0755 "${verify_dir}/linux-x86_64/aren"
