@@ -25,13 +25,15 @@ If you want Codex in your code editor (VS Code, Cursor, Windsurf), <a href="http
 - [x] Allgemeine lokale Anfragen zu Dateien, Systemzustand und Git werden mit
   den vorhandenen Shell-Werkzeugen gelöst; große MCP-/App-Werkzeugkataloge
   werden pro Anfrage relevant gefiltert statt durch Einzelfall-Skripte ersetzt.
-- [x] GitHub Actions ist für dieses Repository vollständig deaktiviert. Builds,
-  Tests und Veröffentlichungen sollen künftig über Jenkins laufen.
+- [x] GitHub Actions führt nur eine kleine, bereits bewährte CI-Prüfung aus:
+  Blob-Größe, `cargo-deny`, Rust-Format/Benchmark-Smoke und `cargo shear`.
+  Builds und Veröffentlichungen sollen künftig über Jenkins laufen.
 
 ## Geplanter Aren-Releaseprozess
 
 - Die geerbten GitHub-Workflows bleiben als Upstream-Referenz im Repository,
-  werden durch die repositoryweite Actions-Sperre aber nicht ausgeführt.
+  sind auf GitHub aber einzeln deaktiviert. Nur der kleine Aren-CI-Workflow und
+  seine beiden wiederverwendbaren Prüfungen bleiben aktiv.
 - Die vorhandenen GitHub Releases bleiben verfügbar. Neue Releases können
   unabhängig von GitHub Actions durch Jenkins oder manuell über die GitHub-API
   einschließlich Binary, Archiv, Build-Info und SHA-256 veröffentlicht werden.
