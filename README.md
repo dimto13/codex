@@ -110,7 +110,7 @@ aren update
 - [x] GitHub Actions führt nur eine kleine, bereits bewährte CI-Prüfung aus:
   Blob-Größe, `cargo-deny`, Rust-Format/Benchmark-Smoke und `cargo shear`.
   Release-Builds laufen ausschließlich für explizite `aren-v*`-Tags.
-- [ ] Versionierte, selbstaktualisierende Releasepakete für Linux x86_64,
+- [x] Versionierte, selbstaktualisierende Releasepakete für Linux x86_64,
   Linux ARM64 und Windows x86_64 sind auf ihren realen GitHub-Runnern geprüft.
 
 # Ollama auf einem anderen Rechner im LAN
@@ -175,7 +175,7 @@ installiert und dort als MCP-Server konfiguriert sein. Zugangsdaten wie
 Ein neues Release wird nach grüner CI aus dem gewünschten Commit erstellt:
 
 ```shell
-version="0.1.4"
+version="0.1.5"
 git tag -a "aren-v${version}" -m "Aren ${version}"
 git push origin "aren-v${version}"
 ```
@@ -185,8 +185,11 @@ Details, Prüf- und Updatebefehle stehen in
 
 # Verifizierter Aren-Stand
 
-- `aren-v0.1.1` wurde am 24. Juli 2026 als erstes vollständig geprüftes
-  Linux-x86_64-Release veröffentlicht.
+- `aren-v0.1.4` wurde am 28. Juli 2026 für Linux x86_64, Linux ARM64 und
+  Windows x86_64 auf den realen GitHub-Runnern gebaut und geprüft.
+- Der öffentliche `latest`-Updater wurde ohne GitHub-Anmeldung getestet und
+  installierte verifiziert `aren 0.1.4`.
+- `aren-v0.1.1` bleibt als geprüftes Linux-x86_64-Rollback erhalten.
 - Aren verwendet real `~/.aren`; andere CLI-Installationen bleiben getrennt
   und unverändert.
 - Chrome DevTools MCP läuft headless mit einem isolierten temporären Profil.
