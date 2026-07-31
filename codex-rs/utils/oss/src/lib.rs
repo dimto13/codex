@@ -1,8 +1,12 @@
 //! OSS provider utilities shared between TUI and exec.
 
 use codex_core::config::Config;
+use codex_model_provider_info::AREN_OLLAMA_ENDPOINTS_ENV;
 use codex_model_provider_info::LMSTUDIO_OSS_PROVIDER_ID;
 use codex_model_provider_info::OLLAMA_OSS_PROVIDER_ID;
+use codex_model_provider_info::OllamaEndpoint;
+use codex_model_provider_info::configured_ollama_endpoints;
+use codex_model_provider_info::qualify_ollama_model;
 use codex_ollama::OllamaModelMetadata;
 use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::openai_models::ModelInfo;
@@ -48,10 +52,14 @@ pub async fn ensure_oss_provider_ready(
                 .map_err(|e| std::io::Error::other(format!("OSS setup failed: {e}")))?;
         }
         OLLAMA_OSS_PROVIDER_ID => {
-            codex_ollama::ensure_responses_supported(&config.model_provider).await?;
-            codex_ollama::ensure_oss_ready(config)
-                .await
-                .map_err(|e| std::io::Error::other(format!("OSS setup failed: {e}")))?;
+            let named_sources = configured_ollama_endpoints()
+                .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))?;
+            if named_sources.is_none() {
+                codex_ollama::ensure_responses_supported(&config.model_provider).await?;
+                codex_ollama::ensure_oss_ready(config)
+                    .await
+                    .map_err(|e| std::io::Error::other(format!("OSS setup failed: {e}")))?;
+            }
         }
         _ => {
             // Unknown provider, skip setup
@@ -70,6 +78,12 @@ pub async fn configure_aren_oss_model_catalog(
 ) -> Result<(), std::io::Error> {
     if provider_id != OLLAMA_OSS_PROVIDER_ID {
         return Ok(());
+    }
+
+    if let Some(endpoints) = configured_ollama_endpoints()
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))?
+    {
+        return configure_named_ollama_model_catalog(config, endpoints).await;
     }
 
     let selected_model = config
@@ -103,6 +117,180 @@ pub async fn configure_aren_oss_model_catalog(
             i32::try_from(priority).unwrap_or(i32::MAX),
         ));
     }
+    config.model_catalog = Some(ModelsResponse { models });
+    Ok(())
+}
+
+struct NamedOllamaSource {
+    endpoint: OllamaEndpoint,
+    client: codex_ollama::OllamaClient,
+    models: Vec<String>,
+}
+
+async fn configure_named_ollama_model_catalog(
+    config: &mut Config,
+    endpoints: Vec<OllamaEndpoint>,
+) -> Result<(), std::io::Error> {
+    let requested_model = config
+        .model
+        .clone()
+        .unwrap_or_else(|| AREN_DEFAULT_OLLAMA_MODEL.to_string());
+    let mut sources = Vec::new();
+    let mut connection_errors = Vec::new();
+    for endpoint in endpoints {
+        if let Err(error) = codex_ollama::ensure_responses_supported_at(&endpoint.base_url).await {
+            tracing::warn!(
+                source = endpoint.name,
+                base_url = endpoint.base_url,
+                %error,
+                "skipping named Ollama source without Responses API support"
+            );
+            connection_errors.push(format!("{}: {error}", endpoint.name));
+            continue;
+        }
+        let client = match codex_ollama::OllamaClient::try_from_base_url(&endpoint.base_url).await {
+            Ok(client) => client,
+            Err(error) => {
+                tracing::warn!(
+                    source = endpoint.name,
+                    base_url = endpoint.base_url,
+                    %error,
+                    "skipping unreachable named Ollama source"
+                );
+                connection_errors.push(format!("{}: {error}", endpoint.name));
+                continue;
+            }
+        };
+        let mut models = match client.fetch_models().await {
+            Ok(models) => models,
+            Err(error) => {
+                tracing::warn!(
+                    source = endpoint.name,
+                    base_url = endpoint.base_url,
+                    %error,
+                    "skipping Ollama source whose model catalog could not be read"
+                );
+                connection_errors.push(format!("{}: {error}", endpoint.name));
+                continue;
+            }
+        };
+        models.sort();
+        models.dedup();
+        sources.push(NamedOllamaSource {
+            endpoint,
+            client,
+            models,
+        });
+    }
+
+    if sources.is_empty() {
+        let details = if connection_errors.is_empty() {
+            "no sources were configured".to_string()
+        } else {
+            connection_errors.join("; ")
+        };
+        return Err(std::io::Error::other(format!(
+            "Cannot reach any Ollama source from {AREN_OLLAMA_ENDPOINTS_ENV}: {details}"
+        )));
+    }
+
+    let requested_route = requested_model.split_once("::");
+    let selected = sources
+        .iter()
+        .find_map(|source| {
+            let model = match requested_route {
+                Some((requested_source, model))
+                    if requested_source.eq_ignore_ascii_case(&source.endpoint.name) =>
+                {
+                    model
+                }
+                Some(_) => return None,
+                None => requested_model.as_str(),
+            };
+            source
+                .models
+                .iter()
+                .any(|candidate| candidate == model)
+                .then(|| (source.endpoint.name.clone(), model.to_string()))
+        })
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!(
+                    "Ollama model `{requested_model}` was not found on any reachable source from {AREN_OLLAMA_ENDPOINTS_ENV}"
+                ),
+            )
+        })?;
+    let selected_slug = qualify_ollama_model(&selected.0, &selected.1);
+    config.model = Some(selected_slug.clone());
+
+    let selected_source = sources
+        .iter()
+        .find(|source| source.endpoint.name == selected.0)
+        .ok_or_else(|| std::io::Error::other("selected named Ollama source disappeared"))?;
+    let selected_metadata = selected_source
+        .client
+        .fetch_model_metadata(&selected.1)
+        .await?;
+    let selected_supports_thinking = supports_thinking(&selected_metadata);
+    config.model_reasoning_effort = normalize_ollama_reasoning_effort(
+        config.model_reasoning_effort.take(),
+        selected_supports_thinking,
+    );
+
+    let mut routed_models = sources
+        .iter()
+        .flat_map(|source| {
+            source.models.iter().map(|model| {
+                (
+                    source.endpoint.name.clone(),
+                    source.endpoint.base_url.clone(),
+                    model.clone(),
+                )
+            })
+        })
+        .collect::<Vec<_>>();
+    routed_models.sort_by(|left, right| {
+        left.2
+            .cmp(&right.2)
+            .then_with(|| left.0.to_lowercase().cmp(&right.0.to_lowercase()))
+    });
+    if let Some(selected_index) = routed_models
+        .iter()
+        .position(|(source, _, model)| source == &selected.0 && model == &selected.1)
+    {
+        let selected_entry = routed_models.remove(selected_index);
+        routed_models.insert(0, selected_entry);
+    }
+
+    let mut models = Vec::with_capacity(routed_models.len());
+    for (priority, (source_name, base_url, model)) in routed_models.into_iter().enumerate() {
+        let slug = qualify_ollama_model(&source_name, &model);
+        let metadata = if slug == selected_slug {
+            Some(selected_metadata.clone())
+        } else {
+            let source = sources
+                .iter()
+                .find(|source| source.endpoint.name == source_name)
+                .ok_or_else(|| std::io::Error::other("named Ollama catalog source disappeared"))?;
+            source.client.fetch_model_metadata(&model).await.ok()
+        };
+        let location = if ollama_endpoint_is_loopback(&base_url) {
+            "local"
+        } else {
+            "network"
+        };
+        let description = format!("Ollama source: {source_name} ({location}).");
+        let mut model_info = aren_ollama_model_info(
+            &slug,
+            metadata.as_ref(),
+            &description,
+            i32::try_from(priority).unwrap_or(i32::MAX),
+        );
+        model_info.display_name = format!("{model} [{source_name}]");
+        models.push(model_info);
+    }
+
     config.model_catalog = Some(ModelsResponse { models });
     Ok(())
 }

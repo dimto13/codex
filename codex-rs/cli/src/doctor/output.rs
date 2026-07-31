@@ -75,7 +75,7 @@ pub(super) fn render_human_report(report: &DoctorReport, options: HumanOutputOpt
     let _ = writeln!(
         out,
         "{} {}",
-        bold("Codex Doctor", options),
+        bold(current_doctor_name(), options),
         dim(&header_suffix(report), options)
     );
     out.push('\n');
@@ -451,14 +451,7 @@ fn write_footer(out: &mut String, options: HumanOutputOptions) {
             dim("expand truncated lists", options)
         );
     } else {
-        let _ = writeln!(
-            out,
-            "{}",
-            dim(
-                "Run codex doctor without --summary for detailed diagnostics.",
-                options
-            )
-        );
+        let _ = writeln!(out, "{}", dim(current_doctor_detail_hint(), options));
         let _ = writeln!(
             out,
             "{} {:<28} {} {}",
@@ -475,6 +468,22 @@ fn write_footer(out: &mut String, options: HumanOutputOptions) {
         cyan("--json", options),
         dim("redacted report", options)
     );
+}
+
+fn current_doctor_name() -> &'static str {
+    if crate::current_invocation_is_aren() {
+        "Aren Doctor"
+    } else {
+        "Codex Doctor"
+    }
+}
+
+fn current_doctor_detail_hint() -> &'static str {
+    if crate::current_invocation_is_aren() {
+        "Run aren doctor without --summary for detailed diagnostics."
+    } else {
+        "Run codex doctor without --summary for detailed diagnostics."
+    }
 }
 
 fn header_suffix(report: &DoctorReport) -> String {

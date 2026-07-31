@@ -99,6 +99,7 @@ use codex_protocol::user_input::UserInput;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_absolute_path::canonicalize_existing_preserving_symlinks;
 use codex_utils_cli::SharedCliOptions;
+use codex_utils_oss::configure_aren_oss_model_catalog;
 use codex_utils_oss::ensure_oss_provider_ready;
 use codex_utils_oss::get_default_model_for_oss_provider;
 use event_processor_with_human_output::EventProcessorWithHumanOutput;
@@ -675,10 +676,10 @@ async fn load_bootstrap_config_or_exit(
 
 async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
     let ExecRunArgs {
-        in_process_start_args,
+        mut in_process_start_args,
         state_db,
         command,
-        config,
+        mut config,
         resume_approvals_reviewer_override,
         dangerously_bypass_approvals_and_sandbox,
         exec_span,
@@ -716,6 +717,12 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
         ensure_oss_provider_ready(provider_id, &config)
             .await
             .map_err(|e| anyhow::anyhow!("OSS setup failed: {e}"))?;
+        if std::env::var_os(codex_model_provider_info::AREN_OLLAMA_ENDPOINTS_ENV).is_some() {
+            configure_aren_oss_model_catalog(provider_id, &mut config)
+                .await
+                .map_err(|e| anyhow::anyhow!("OSS model catalog setup failed: {e}"))?;
+            in_process_start_args.config = std::sync::Arc::new(config.clone());
+        }
     }
 
     let default_cwd = config.cwd.to_path_buf();

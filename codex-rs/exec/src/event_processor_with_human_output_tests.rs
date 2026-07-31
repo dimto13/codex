@@ -22,10 +22,24 @@ use pretty_assertions::assert_eq;
 use super::EventProcessorWithHumanOutput;
 use super::config_summary_entries;
 use super::final_message_from_turn_items;
+use super::invocation_name_is_aren;
 use super::reasoning_text;
 use super::should_print_final_message_to_stdout;
 use super::should_print_final_message_to_tty;
 use crate::event_processor::EventProcessor;
+
+#[test]
+fn detects_aren_exec_invocation_name() {
+    assert!(invocation_name_is_aren(Some(OsStr::new(
+        "/home/user/bin/aren"
+    ))));
+    assert!(invocation_name_is_aren(Some(OsStr::new(
+        "C:/Users/user/bin/AREN.EXE"
+    ))));
+    assert!(!invocation_name_is_aren(Some(OsStr::new(
+        "/usr/local/bin/codex"
+    ))));
+}
 
 #[test]
 fn suppresses_final_stdout_message_when_both_streams_are_terminals() {
@@ -515,3 +529,4 @@ fn turn_interrupted_clears_stale_final_message() {
     assert!(!processor.final_message_rendered);
     assert!(!processor.emit_final_message_on_shutdown);
 }
+use std::ffi::OsStr;

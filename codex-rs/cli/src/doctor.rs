@@ -487,7 +487,11 @@ async fn build_report(
         schema_version: 1,
         generated_at: generated_at(),
         overall_status,
-        codex_version: env!("CARGO_PKG_VERSION").to_string(),
+        codex_version: if crate::current_invocation_is_aren() {
+            codex_utils_oss::AREN_VERSION.to_string()
+        } else {
+            env!("CARGO_PKG_VERSION").to_string()
+        },
         checks,
     }
 }
