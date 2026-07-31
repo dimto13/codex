@@ -10,6 +10,10 @@ use codex_protocol::openai_models::ModelVisibility;
 use codex_protocol::openai_models::ModelsResponse;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::openai_models::ReasoningEffortPreset;
+use std::net::IpAddr;
+
+const LOCAL_OLLAMA_MODEL_DESCRIPTION: &str = "Installed in local Ollama.";
+const REMOTE_OLLAMA_MODEL_DESCRIPTION: &str = "Remote Ollama model (network).";
 
 /// Ollama provider selected when Aren is launched without local-provider flags.
 pub const AREN_DEFAULT_OSS_PROVIDER: &str = OLLAMA_OSS_PROVIDER_ID;
@@ -84,6 +88,7 @@ pub async fn configure_aren_oss_model_catalog(
     model_names.retain(|model| model != &selected_model);
     model_names.insert(0, selected_model.clone());
 
+    let model_description = ollama_model_description(&config.model_provider);
     let mut models = Vec::with_capacity(model_names.len());
     for (priority, model) in model_names.into_iter().enumerate() {
         let metadata = if model == selected_model {
@@ -94,6 +99,7 @@ pub async fn configure_aren_oss_model_catalog(
         models.push(aren_ollama_model_info(
             &model,
             metadata.as_ref(),
+            model_description,
             i32::try_from(priority).unwrap_or(i32::MAX),
         ));
     }
@@ -104,11 +110,12 @@ pub async fn configure_aren_oss_model_catalog(
 fn aren_ollama_model_info(
     model: &str,
     metadata: Option<&OllamaModelMetadata>,
+    description: &str,
     priority: i32,
 ) -> ModelInfo {
     let supports_thinking = metadata.is_some_and(supports_thinking);
     let mut model_info = codex_models_manager::model_info::model_info_from_slug(model);
-    model_info.description = Some("Installed locally in Ollama.".to_string());
+    model_info.description = Some(description.to_string());
     model_info.default_reasoning_level = Some(if supports_thinking {
         ReasoningEffort::High
     } else {
@@ -125,6 +132,42 @@ fn aren_ollama_model_info(
         model_info.max_context_window = Some(context_window);
     }
     model_info
+}
+
+fn ollama_model_description(
+    provider: &codex_model_provider_info::ModelProviderInfo,
+) -> &'static str {
+    match provider.base_url.as_deref() {
+        Some(base_url) if ollama_endpoint_is_loopback(base_url) => LOCAL_OLLAMA_MODEL_DESCRIPTION,
+        Some(_) | None => REMOTE_OLLAMA_MODEL_DESCRIPTION,
+    }
+}
+
+fn ollama_endpoint_is_loopback(base_url: &str) -> bool {
+    let endpoint = base_url
+        .split_once("://")
+        .map_or(base_url, |(_, endpoint)| endpoint);
+    let authority = endpoint.split('/').next().unwrap_or_default();
+    let host_and_port = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host_and_port)| host_and_port);
+    let host = if let Some(bracketed_host) = host_and_port.strip_prefix('[') {
+        bracketed_host
+            .split_once(']')
+            .map_or(bracketed_host, |(host, _)| host)
+    } else if host_and_port.matches(':').count() == 1 {
+        host_and_port
+            .rsplit_once(':')
+            .map_or(host_and_port, |(host, _)| host)
+    } else {
+        host_and_port
+    };
+    let host = host.trim_end_matches('.');
+
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<IpAddr>()
+            .is_ok_and(|address| address.is_loopback())
 }
 
 fn supports_thinking(metadata: &OllamaModelMetadata) -> bool {
@@ -234,9 +277,18 @@ mod tests {
             context_window: Some(131_072),
         };
 
-        let model = aren_ollama_model_info("gpt-oss:20b", Some(&metadata), /*priority*/ 0);
+        let model = aren_ollama_model_info(
+            "gpt-oss:20b",
+            Some(&metadata),
+            LOCAL_OLLAMA_MODEL_DESCRIPTION,
+            /*priority*/ 0,
+        );
 
         assert_eq!(model.slug, "gpt-oss:20b");
+        assert_eq!(
+            model.description.as_deref(),
+            Some(LOCAL_OLLAMA_MODEL_DESCRIPTION)
+        );
         assert_eq!(model.visibility, ModelVisibility::List);
         assert_eq!(model.default_reasoning_level, Some(ReasoningEffort::High));
         assert_eq!(model.context_window, Some(131_072));
@@ -272,6 +324,36 @@ mod tests {
             model
                 .base_instructions
                 .contains("`mcp__executor__web_fetch`")
+        );
+    }
+
+    #[test]
+    fn labels_remote_ollama_models_as_network_models() {
+        let provider = codex_model_provider_info::ModelProviderInfo {
+            base_url: Some("http://192.168.178.170:11434/v1".to_string()),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            ollama_model_description(&provider),
+            REMOTE_OLLAMA_MODEL_DESCRIPTION
+        );
+    }
+
+    #[test]
+    fn recognizes_loopback_ollama_endpoints() {
+        let loopback_endpoints = [
+            "http://localhost:11434/v1",
+            "http://localhost.:11434/v1",
+            "http://127.0.0.1:11434/v1",
+            "http://127.42.0.1:11434/v1",
+            "http://[::1]:11434/v1",
+        ];
+
+        assert!(
+            loopback_endpoints
+                .into_iter()
+                .all(ollama_endpoint_is_loopback)
         );
     }
 
