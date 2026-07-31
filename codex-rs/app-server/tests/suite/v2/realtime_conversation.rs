@@ -2767,7 +2767,10 @@ async fn realtime_webrtc_start_surfaces_backend_error() -> Result<()> {
     let error =
         read_notification::<ThreadRealtimeErrorNotification>(&mut mcp, "thread/realtime/error")
             .await?;
-    assert!(error.message.contains("currently experiencing high demand"));
+    assert_eq!(
+        error.message,
+        "The model provider returned an internal server error."
+    );
 
     realtime_server.shutdown().await;
     Ok(())

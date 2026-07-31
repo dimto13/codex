@@ -15,6 +15,7 @@ use codex_otel::RuntimeMetricTotals;
 use codex_otel::RuntimeMetricsSummary;
 use codex_protocol::ThreadId;
 use codex_protocol::account::PlanType;
+use codex_protocol::error::CodexErr;
 use codex_protocol::error::UnexpectedResponseError;
 use codex_protocol::parse_command::ParsedCommand;
 use dirs::home_dir;
@@ -769,6 +770,14 @@ fn error_event_oversized_input_snapshot() {
         "Message exceeds the maximum length of 1048576 characters (1048577 provided).".to_string(),
     );
     let rendered = render_lines(&cell.display_lines(/*width*/ 120)).join("\n");
+    insta::assert_snapshot!(rendered);
+}
+
+#[test]
+fn error_event_internal_server_error_snapshot() {
+    let cell = new_error_event(CodexErr::InternalServerError.to_string());
+    let rendered = render_lines(&cell.display_lines(/*width*/ 80)).join("\n");
+
     insta::assert_snapshot!(rendered);
 }
 

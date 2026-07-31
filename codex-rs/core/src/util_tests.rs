@@ -258,6 +258,11 @@ fn emit_feedback_auth_recovery_tags_clears_stale_401_fields() {
 }
 
 #[test]
+fn backoff_caps_large_retry_attempts() {
+    assert_eq!(backoff(100), Duration::from_millis(MAX_RETRY_DELAY_MS));
+}
+
+#[test]
 fn emit_feedback_request_tags_preserves_latest_auth_fields_after_unauthorized() {
     let tags = Arc::new(Mutex::new(BTreeMap::new()));
     let event_count = Arc::new(Mutex::new(0));

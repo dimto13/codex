@@ -128,7 +128,7 @@ pub enum CodexErr {
         "To use Codex with your ChatGPT plan, upgrade to Plus: https://chatgpt.com/explore/plus."
     )]
     UsageNotIncluded,
-    #[error("We're currently experiencing high demand, which may cause temporary errors.")]
+    #[error("The model provider returned an internal server error.")]
     InternalServerError,
     /// Retry limit exceeded.
     #[error("{0}")]

@@ -1,0 +1,5 @@
+---
+source: tui/src/history_cell/tests.rs
+expression: rendered
+---
+■ The model provider returned an internal server error.

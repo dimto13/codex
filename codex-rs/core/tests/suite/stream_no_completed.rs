@@ -1,8 +1,8 @@
 //! Verifies that the agent retries when the SSE stream terminates before
 //! delivering a `response.completed` event.
 
-use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::WireApi;
+use codex_model_provider_info::create_oss_provider_with_base_url;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::Op;
 use codex_protocol::user_input::UserInput;
@@ -21,7 +21,7 @@ fn sse_incomplete() -> String {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn retries_on_early_close() {
+async fn oss_provider_retries_on_early_close_with_extended_budget() {
     skip_if_no_network!();
 
     let incomplete_sse = sse_incomplete();
@@ -39,32 +39,12 @@ async fn retries_on_early_close() {
     ])
     .await;
 
-    // Configure retry behavior explicitly to avoid mutating process-wide
-    // environment variables.
-
-    let model_provider = ModelProviderInfo {
-        name: "openai".into(),
-        base_url: Some(format!("{}/v1", server.uri())),
-        // Environment variable that should exist in the test environment.
-        // ModelClient will return an error if the environment variable for the
-        // provider is not set.
-        env_key: Some("PATH".into()),
-        env_key_instructions: None,
-        experimental_bearer_token: None,
-        auth: None,
-        aws: None,
-        wire_api: WireApi::Responses,
-        query_params: None,
-        http_headers: None,
-        env_http_headers: None,
-        // exercise retry path: first attempt yields incomplete stream, so allow 1 retry
-        request_max_retries: Some(0),
-        stream_max_retries: Some(1),
-        stream_idle_timeout_ms: Some(2000),
-        websocket_connect_timeout_ms: None,
-        requires_openai_auth: false,
-        supports_websockets: false,
-    };
+    // Disable request-layer retries so the recovery specifically exercises the OSS stream retry
+    // default rather than retrying inside the HTTP client.
+    let mut model_provider =
+        create_oss_provider_with_base_url(&format!("{}/v1", server.uri()), WireApi::Responses);
+    model_provider.request_max_retries = Some(0);
+    model_provider.stream_idle_timeout_ms = Some(2_000);
 
     let TestCodex { codex, .. } = test_codex()
         .with_config(move |config| {
@@ -87,6 +67,14 @@ async fn retries_on_early_close() {
         })
         .await
         .unwrap();
+
+    wait_for_event(&codex, |event| {
+        matches!(
+            event,
+            EventMsg::StreamError(error) if error.message == "Reconnecting... 1/34"
+        )
+    })
+    .await;
 
     // Wait until TurnComplete (should succeed after retry).
     wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
