@@ -230,8 +230,8 @@ impl ChatWidget {
 
         let header = if brand.is_aren() && self.config.model_provider.is_oss() {
             self.model_menu_header(
-                "Select Local Model and Effort",
-                "Models installed in Ollama. Add more with `ollama pull <model_name>`.",
+                "Select Ollama Model and Effort",
+                "Models available from the configured Ollama server.",
             )
         } else {
             self.model_menu_header(

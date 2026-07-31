@@ -3089,7 +3089,7 @@ async fn model_selection_popup_snapshot() {
 }
 
 #[tokio::test]
-async fn aren_local_model_selection_popup_snapshot() {
+async fn aren_ollama_model_selection_popup_snapshot() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-oss:20b")).await;
     chat.thread_id = Some(ThreadId::new());
     chat.config.model_provider = chat
@@ -3102,7 +3102,7 @@ async fn aren_local_model_selection_popup_snapshot() {
         id: "gpt-oss:20b".to_string(),
         model: "gpt-oss:20b".to_string(),
         display_name: "gpt-oss:20b".to_string(),
-        description: "Installed locally in Ollama.".to_string(),
+        description: "Remote Ollama model (network).".to_string(),
         default_reasoning_effort: ReasoningEffortConfig::High,
         supported_reasoning_efforts: vec![ReasoningEffortPreset {
             effort: ReasoningEffortConfig::High,
@@ -3124,7 +3124,7 @@ async fn aren_local_model_selection_popup_snapshot() {
     chat.open_all_models_popup_for_brand(vec![preset], crate::brand::AppBrand::Aren);
 
     let popup = render_bottom_popup(&chat, /*width*/ 80);
-    assert_chatwidget_snapshot!("aren_local_model_selection_popup", popup);
+    assert_chatwidget_snapshot!("aren_ollama_model_selection_popup", popup);
 }
 
 #[tokio::test]
