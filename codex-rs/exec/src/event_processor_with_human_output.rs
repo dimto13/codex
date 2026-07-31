@@ -1,3 +1,4 @@
+use std::ffi::OsStr;
 use std::io::IsTerminal;
 use std::path::PathBuf;
 
@@ -99,7 +100,7 @@ impl EventProcessorWithHumanOutput {
             ThreadItem::AgentMessage { text, .. } => {
                 eprintln!(
                     "{}\n{}",
-                    "codex".style(self.italic).style(self.magenta),
+                    current_agent_label().style(self.italic).style(self.magenta),
                     text
                 );
                 self.final_message = Some(text);
@@ -214,8 +215,12 @@ impl EventProcessor for EventProcessorWithHumanOutput {
         prompt: &str,
         session_configured_event: &SessionConfiguredEvent,
     ) {
-        const VERSION: &str = env!("CARGO_PKG_VERSION");
-        eprintln!("OpenAI Codex v{VERSION}\n--------");
+        if current_invocation_is_aren() {
+            eprintln!("Aren v{}\n--------", codex_utils_oss::AREN_VERSION);
+        } else {
+            const VERSION: &str = env!("CARGO_PKG_VERSION");
+            eprintln!("OpenAI Codex v{VERSION}\n--------");
+        }
         for (key, value) in config_summary_entries(config, session_configured_event) {
             eprintln!("{} {}", format!("{key}:").style(self.bold), value);
         }
@@ -409,10 +414,28 @@ impl EventProcessor for EventProcessorWithHumanOutput {
         {
             eprintln!(
                 "{}\n{}",
-                "codex".style(self.italic).style(self.magenta),
+                current_agent_label().style(self.italic).style(self.magenta),
                 message
             );
         }
+    }
+}
+
+fn invocation_name_is_aren(arg0: Option<&OsStr>) -> bool {
+    arg0.and_then(|value| std::path::Path::new(value).file_stem())
+        .and_then(OsStr::to_str)
+        .is_some_and(|name| name.eq_ignore_ascii_case("aren"))
+}
+
+fn current_invocation_is_aren() -> bool {
+    invocation_name_is_aren(std::env::args_os().next().as_deref())
+}
+
+fn current_agent_label() -> &'static str {
+    if current_invocation_is_aren() {
+        "aren"
+    } else {
+        "codex"
     }
 }
 

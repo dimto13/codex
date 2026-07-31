@@ -3,8 +3,8 @@ source: tui/src/chatwidget/tests/popups_and_settings.rs
 expression: popup
 ---
   Select Ollama Model and Effort
-  Models available from the configured Ollama server.
+  Models available from the configured Ollama source(s).
 
-› 1. gpt-oss:20b (current)  Remote Ollama model (network).
+› 1. gpt-oss:20b [rmi] (current)  Ollama source: rmi (network).
 
   Press enter to confirm or esc to go back

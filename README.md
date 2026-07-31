@@ -81,6 +81,17 @@ export AREN_OLLAMA_BASE_URL="http://192.168.1.25:11434"
 aren
 ```
 
+Mehrere Ollama-Rechner können als benannte Quellen zusammengeführt werden:
+
+```shell
+export AREN_OLLAMA_ENDPOINTS="rmi=http://192.168.1.25:11434,kali=http://127.0.0.1:11434"
+aren
+```
+
+`/model` zeigt dann beispielsweise `gemma4:e4b [rmi]` und
+`gemma4:e4b [kali]` als getrennte Einträge. Die Auswahl bestimmt zugleich, an
+welchen Rechner Aren die Modellanfrage sendet.
+
 Ein späteres Update installiert automatisch den neuesten stabilen Release:
 
 ```shell
@@ -107,6 +118,9 @@ aren update
   `~/.aren/aren-version.json`; Codex-Installationen werden nicht verändert.
 - [x] Aren kann Ollama wahlweise lokal oder über
   `AREN_OLLAMA_BASE_URL` auf einem leistungsfähigeren Rechner im LAN nutzen.
+- [x] Aren kann mehrere benannte Ollama-Rechner über
+  `AREN_OLLAMA_ENDPOINTS` aggregieren, die Quelle im Modellmenü anzeigen und
+  Anfragen an den Rechner des ausgewählten Eintrags routen.
 - [x] Allgemeine lokale Anfragen zu Dateien, Systemzustand und Git werden mit
   den vorhandenen Shell-Werkzeugen gelöst; große MCP-/App-Werkzeugkataloge
   werden pro Anfrage relevant gefiltert statt durch Einzelfall-Skripte ersetzt.
@@ -157,6 +171,27 @@ Transportverschlüsselung; außerhalb eines vertrauenswürdigen LANs sollte sie
 nur über einen abgesicherten Reverse-Proxy oder VPN erreichbar sein. Weitere
 Hinweise stehen in Ollamas
 [Netzwerk-Dokumentation](https://docs.ollama.com/faq#how-can-i-expose-ollama-on-my-network).
+
+## Mehrere Ollama-Rechner
+
+Für mehrere Quellen wird `AREN_OLLAMA_ENDPOINTS` als kommaseparierte Liste aus
+`name=url`-Einträgen gesetzt. Namen dürfen Buchstaben, Zahlen, Bindestriche und
+Unterstriche enthalten:
+
+```shell
+export AREN_OLLAMA_ENDPOINTS="rmi=192.168.178.170:11434,kali=127.0.0.1:11434,gaming-pc=192.168.178.50:11434"
+aren
+```
+
+Die benannte Mehrfachkonfiguration hat Vorrang vor
+`AREN_OLLAMA_BASE_URL` und `OLLAMA_HOST`. Aren liest die Kataloge aller
+erreichbaren Quellen, überspringt vorübergehend ausgeschaltete Rechner und
+zeigt den Quellnamen an jedem Modell an. Derselbe Modellname darf auf mehreren
+Rechnern vorkommen; die Einträge bleiben durch den Quellnamen eindeutig.
+Ausgewählte Modelle werden intern als `quelle::modell` gespeichert, während
+das Menü die lesbare Form `modell [quelle]` verwendet. Ist
+`AREN_OLLAMA_ENDPOINTS` nicht gesetzt, bleibt das bisherige Verhalten mit
+genau einem lokalen oder entfernten Ollama-Server unverändert.
 
 MCP-Server und persönliche Einstellungen werden absichtlich nicht als
 Releasebestandteil verteilt. Sie liegen getrennt unter `~/.aren/` und müssen

@@ -63,6 +63,16 @@ fn supports_responses(version: &Version) -> bool {
 /// Returns `Ok(())` when the version endpoint is missing or unparsable.
 pub async fn ensure_responses_supported(provider: &ModelProviderInfo) -> std::io::Result<()> {
     let client = crate::OllamaClient::try_from_provider(provider).await?;
+    ensure_client_responses_supported(&client).await
+}
+
+/// Ensure a named Ollama source is new enough to support the Responses API.
+pub async fn ensure_responses_supported_at(base_url: &str) -> std::io::Result<()> {
+    let client = crate::OllamaClient::try_from_base_url(base_url).await?;
+    ensure_client_responses_supported(&client).await
+}
+
+async fn ensure_client_responses_supported(client: &OllamaClient) -> std::io::Result<()> {
     let Some(version) = client.fetch_version().await? else {
         return Ok(());
     };

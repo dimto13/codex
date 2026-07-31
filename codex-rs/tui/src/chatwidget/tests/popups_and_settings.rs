@@ -3090,7 +3090,7 @@ async fn model_selection_popup_snapshot() {
 
 #[tokio::test]
 async fn aren_ollama_model_selection_popup_snapshot() {
-    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-oss:20b")).await;
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("rmi::gpt-oss:20b")).await;
     chat.thread_id = Some(ThreadId::new());
     chat.config.model_provider = chat
         .config
@@ -3099,10 +3099,10 @@ async fn aren_ollama_model_selection_popup_snapshot() {
         .expect("built-in Ollama provider")
         .clone();
     let preset = ModelPreset {
-        id: "gpt-oss:20b".to_string(),
-        model: "gpt-oss:20b".to_string(),
-        display_name: "gpt-oss:20b".to_string(),
-        description: "Remote Ollama model (network).".to_string(),
+        id: "rmi::gpt-oss:20b".to_string(),
+        model: "rmi::gpt-oss:20b".to_string(),
+        display_name: "gpt-oss:20b [rmi]".to_string(),
+        description: "Ollama source: rmi (network).".to_string(),
         default_reasoning_effort: ReasoningEffortConfig::High,
         supported_reasoning_efforts: vec![ReasoningEffortPreset {
             effort: ReasoningEffortConfig::High,

@@ -158,6 +158,10 @@ impl ModelProviderInfo {
         )
     }
 
+    pub fn is_ollama(&self) -> bool {
+        self.name == OLLAMA_PROVIDER_NAME
+    }
+
     pub fn validate(&self) -> std::result::Result<(), String> {
         if self.aws.is_some() {
             if self.supports_websockets {
@@ -435,9 +439,25 @@ const LMSTUDIO_PROVIDER_NAME: &str = "LM Studio";
 
 pub const LMSTUDIO_OSS_PROVIDER_ID: &str = "lmstudio";
 pub const OLLAMA_OSS_PROVIDER_ID: &str = "ollama";
+pub const AREN_OLLAMA_ENDPOINTS_ENV: &str = "AREN_OLLAMA_ENDPOINTS";
+pub const OLLAMA_MODEL_SOURCE_SEPARATOR: &str = "::";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OllamaEndpoint {
+    pub name: String,
+    pub base_url: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OllamaModelRoute {
+    pub source: String,
+    pub model: String,
+    pub base_url: String,
+}
 
 #[derive(Default)]
 struct OssProviderEnvironment {
+    aren_ollama_endpoints: Option<String>,
     aren_ollama_base_url: Option<String>,
     ollama_host: Option<String>,
     legacy_base_url: Option<String>,
@@ -447,6 +467,7 @@ struct OssProviderEnvironment {
 impl OssProviderEnvironment {
     fn from_process() -> Self {
         Self {
+            aren_ollama_endpoints: std::env::var(AREN_OLLAMA_ENDPOINTS_ENV).ok(),
             aren_ollama_base_url: std::env::var("AREN_OLLAMA_BASE_URL").ok(),
             ollama_host: std::env::var("OLLAMA_HOST").ok(),
             legacy_base_url: std::env::var("CODEX_OSS_BASE_URL").ok(),
@@ -552,7 +573,12 @@ fn create_oss_provider_with_environment(
         .filter(|value| !value.trim().is_empty());
     let codex_oss_base_url = if default_provider_port == DEFAULT_OLLAMA_PORT {
         environment
-            .aren_ollama_base_url
+            .aren_ollama_endpoints
+            .as_deref()
+            .and_then(|value| parse_ollama_endpoints(value).ok())
+            .and_then(|endpoints| endpoints.into_iter().next())
+            .map(|endpoint| endpoint.base_url)
+            .or(environment.aren_ollama_base_url)
             .filter(|value| !value.trim().is_empty())
             .or_else(|| {
                 environment
@@ -575,7 +601,95 @@ fn create_oss_provider_with_environment(
     provider
 }
 
-fn normalize_ollama_base_url(base_url: &str) -> String {
+pub fn configured_ollama_endpoints() -> Result<Option<Vec<OllamaEndpoint>>, String> {
+    std::env::var(AREN_OLLAMA_ENDPOINTS_ENV)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| parse_ollama_endpoints(&value))
+        .transpose()
+}
+
+pub fn qualify_ollama_model(source: &str, model: &str) -> String {
+    format!("{source}{OLLAMA_MODEL_SOURCE_SEPARATOR}{model}")
+}
+
+pub fn resolve_ollama_model_route(model: &str) -> Result<Option<OllamaModelRoute>, String> {
+    let Some(endpoints) = configured_ollama_endpoints()? else {
+        return Ok(None);
+    };
+    resolve_ollama_model_route_with_endpoints(model, &endpoints)
+}
+
+fn resolve_ollama_model_route_with_endpoints(
+    model: &str,
+    endpoints: &[OllamaEndpoint],
+) -> Result<Option<OllamaModelRoute>, String> {
+    let Some((source, model)) = model.split_once(OLLAMA_MODEL_SOURCE_SEPARATOR) else {
+        return Ok(None);
+    };
+    if source.is_empty() || model.is_empty() {
+        return Ok(None);
+    }
+    let endpoint = endpoints
+        .iter()
+        .find(|endpoint| endpoint.name.eq_ignore_ascii_case(source))
+        .ok_or_else(|| {
+            format!(
+                "Ollama model `{source}{OLLAMA_MODEL_SOURCE_SEPARATOR}{model}` references unknown source `{source}`"
+            )
+        })?;
+    Ok(Some(OllamaModelRoute {
+        source: endpoint.name.clone(),
+        model: model.to_string(),
+        base_url: endpoint.base_url.clone(),
+    }))
+}
+
+pub fn parse_ollama_endpoints(value: &str) -> Result<Vec<OllamaEndpoint>, String> {
+    let mut endpoints = Vec::new();
+    for raw_entry in value.split(',') {
+        let entry = raw_entry.trim();
+        if entry.is_empty() {
+            continue;
+        }
+        let Some((name, base_url)) = entry.split_once('=') else {
+            return Err(format!(
+                "invalid {AREN_OLLAMA_ENDPOINTS_ENV} entry `{entry}`; expected name=url"
+            ));
+        };
+        let name = name.trim();
+        if name.is_empty()
+            || !name.chars().all(|character| {
+                character.is_ascii_alphanumeric() || matches!(character, '-' | '_')
+            })
+        {
+            return Err(format!(
+                "invalid Ollama source name `{name}`; use letters, numbers, `-`, or `_`"
+            ));
+        }
+        if endpoints
+            .iter()
+            .any(|endpoint: &OllamaEndpoint| endpoint.name.eq_ignore_ascii_case(name))
+        {
+            return Err(format!("duplicate Ollama source name `{name}`"));
+        }
+        if base_url.trim().is_empty() {
+            return Err(format!("Ollama source `{name}` has an empty URL"));
+        }
+        endpoints.push(OllamaEndpoint {
+            name: name.to_string(),
+            base_url: normalize_ollama_base_url(base_url),
+        });
+    }
+    if endpoints.is_empty() {
+        return Err(format!(
+            "{AREN_OLLAMA_ENDPOINTS_ENV} must contain at least one name=url entry"
+        ));
+    }
+    Ok(endpoints)
+}
+
+pub fn normalize_ollama_base_url(base_url: &str) -> String {
     let base_url = base_url.trim().trim_end_matches('/');
     let base_url = if base_url.contains("://") {
         base_url.to_string()

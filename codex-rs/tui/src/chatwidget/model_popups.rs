@@ -208,6 +208,14 @@ impl ChatWidget {
             let description =
                 (!preset.description.is_empty()).then_some(preset.description.to_string());
             let is_current = preset.model.as_str() == self.current_model();
+            let display_name = if brand.is_aren()
+                && self.config.model_provider.is_ollama()
+                && preset.model.contains("::")
+            {
+                preset.display_name.clone()
+            } else {
+                preset.model.clone()
+            };
             let single_supported_effort = preset.supported_reasoning_efforts.len() == 1;
             let preset_for_action = preset.clone();
             let actions: Vec<SelectionAction> = vec![Box::new(move |tx| {
@@ -217,7 +225,7 @@ impl ChatWidget {
                 });
             })];
             items.push(SelectionItem {
-                name: preset.model.clone(),
+                name: display_name,
                 description,
                 is_current,
                 is_default: preset.is_default,
@@ -231,7 +239,7 @@ impl ChatWidget {
         let header = if brand.is_aren() && self.config.model_provider.is_oss() {
             self.model_menu_header(
                 "Select Ollama Model and Effort",
-                "Models available from the configured Ollama server.",
+                "Models available from the configured Ollama source(s).",
             )
         } else {
             self.model_menu_header(

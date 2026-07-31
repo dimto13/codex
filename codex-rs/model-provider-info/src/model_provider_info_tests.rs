@@ -53,6 +53,7 @@ fn aren_ollama_url_selects_remote_server_and_normalizes_openai_root() {
         DEFAULT_OLLAMA_PORT,
         WireApi::Responses,
         OssProviderEnvironment {
+            aren_ollama_endpoints: None,
             aren_ollama_base_url: Some(" 192.168.1.25:11434/ ".to_string()),
             ollama_host: Some("http://ignored.example:11434".to_string()),
             legacy_base_url: Some("http://legacy.example:11434/v1".to_string()),
@@ -64,6 +65,85 @@ fn aren_ollama_url_selects_remote_server_and_normalizes_openai_root() {
         provider.base_url,
         Some("http://192.168.1.25:11434/v1".to_string())
     );
+}
+
+#[test]
+fn named_ollama_endpoints_select_first_source_for_initial_provider() {
+    let provider = create_oss_provider_with_environment(
+        DEFAULT_OLLAMA_PORT,
+        WireApi::Responses,
+        OssProviderEnvironment {
+            aren_ollama_endpoints: Some(
+                "rmi=192.168.178.170:11434, kali=http://127.0.0.1:11434".to_string(),
+            ),
+            aren_ollama_base_url: Some("http://ignored.example:11434".to_string()),
+            ..OssProviderEnvironment::default()
+        },
+    );
+
+    assert_eq!(
+        provider.base_url,
+        Some("http://192.168.178.170:11434/v1".to_string())
+    );
+}
+
+#[test]
+fn parses_named_ollama_endpoints() {
+    assert_eq!(
+        parse_ollama_endpoints("rmi=192.168.178.170:11434, kali=http://127.0.0.1:11434/v1/"),
+        Ok(vec![
+            OllamaEndpoint {
+                name: "rmi".to_string(),
+                base_url: "http://192.168.178.170:11434/v1".to_string(),
+            },
+            OllamaEndpoint {
+                name: "kali".to_string(),
+                base_url: "http://127.0.0.1:11434/v1".to_string(),
+            },
+        ])
+    );
+}
+
+#[test]
+fn rejects_invalid_or_duplicate_ollama_source_names() {
+    let invalid = parse_ollama_endpoints("not valid=http://localhost:11434")
+        .expect_err("source names with spaces must be rejected");
+    let duplicate =
+        parse_ollama_endpoints("rmi=http://192.168.178.170:11434,RMI=http://192.168.178.171:11434")
+            .expect_err("source names must be unique");
+
+    assert!(invalid.contains("invalid Ollama source name"));
+    assert!(duplicate.contains("duplicate Ollama source name"));
+}
+
+#[test]
+fn resolves_qualified_model_to_named_ollama_source() {
+    let endpoints = parse_ollama_endpoints("rmi=192.168.178.170:11434,kali=127.0.0.1:11434")
+        .expect("valid named endpoints");
+
+    assert_eq!(
+        resolve_ollama_model_route_with_endpoints("rmi::gemma4:e4b", &endpoints),
+        Ok(Some(OllamaModelRoute {
+            source: "rmi".to_string(),
+            model: "gemma4:e4b".to_string(),
+            base_url: "http://192.168.178.170:11434/v1".to_string(),
+        }))
+    );
+    assert_eq!(
+        resolve_ollama_model_route_with_endpoints("gemma4:e4b", &endpoints),
+        Ok(None)
+    );
+}
+
+#[test]
+fn rejects_qualified_model_with_unknown_source() {
+    let endpoints =
+        parse_ollama_endpoints("rmi=192.168.178.170:11434").expect("valid named endpoint");
+
+    let error = resolve_ollama_model_route_with_endpoints("kali::gemma4:e4b", &endpoints)
+        .expect_err("unknown source must be rejected");
+
+    assert!(error.contains("unknown source `kali`"));
 }
 
 #[test]

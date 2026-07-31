@@ -4325,6 +4325,7 @@ dependencies = [
  "codex-models-manager",
  "codex-ollama",
  "codex-protocol",
+ "tracing",
 ]
 
 [[package]]

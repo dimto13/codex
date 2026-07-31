@@ -23,6 +23,7 @@
 //! WebSocket prewarm is treated as the first websocket connection attempt for a turn. If it
 //! fails, normal stream retry/fallback logic handles recovery on the same turn.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
@@ -143,6 +144,7 @@ use codex_model_provider::create_model_provider;
 use codex_model_provider_info::DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::WireApi;
+use codex_model_provider_info::resolve_ollama_model_route;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result;
 use codex_response_debug_context::extract_response_debug_context;
@@ -1069,6 +1071,26 @@ impl ModelClient {
         })
     }
 
+    async fn current_client_setup_for_model<'a>(
+        &self,
+        model_info: &'a ModelInfo,
+    ) -> Result<(CurrentClientSetup, Cow<'a, ModelInfo>)> {
+        let mut setup = self.current_client_setup().await?;
+        if !self.state.provider.info().is_ollama() {
+            return Ok((setup, Cow::Borrowed(model_info)));
+        }
+        let Some(route) =
+            resolve_ollama_model_route(&model_info.slug).map_err(CodexErr::InvalidRequest)?
+        else {
+            return Ok((setup, Cow::Borrowed(model_info)));
+        };
+
+        setup.api_provider.base_url = route.base_url;
+        let mut routed_model_info = model_info.clone();
+        routed_model_info.slug = route.model;
+        Ok((setup, Cow::Owned(routed_model_info)))
+    }
+
     fn build_api_transport(
         &self,
         api_provider: &ApiProvider,
@@ -1518,7 +1540,11 @@ impl ModelClientSession {
             .map(AuthManager::unauthorized_recovery);
         let mut pending_retry = PendingUnauthorizedRetry::default();
         loop {
-            let client_setup = self.client.current_client_setup().await?;
+            let (client_setup, routed_model_info) = self
+                .client
+                .current_client_setup_for_model(model_info)
+                .await?;
+            let routed_model_info = routed_model_info.as_ref();
             let transport = self
                 .client
                 .build_api_transport(&client_setup.api_provider, RESPONSES_ENDPOINT)?;
@@ -1546,7 +1572,7 @@ impl ModelClientSession {
             let mut request = self.client.build_responses_request(
                 &client_setup.api_provider,
                 prompt,
-                model_info,
+                routed_model_info,
                 effort.clone(),
                 summary,
                 service_tier.clone(),
