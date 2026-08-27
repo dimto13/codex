@@ -744,9 +744,7 @@ impl App {
         crate::app_server_session::ResumeModelSettings,
         Option<crate::session_resume::SessionModelState>,
     ) {
-        if requested_settings
-            != crate::app_server_session::ResumeModelSettings::RestoreFromThread
-        {
+        if requested_settings != crate::app_server_session::ResumeModelSettings::RestoreFromThread {
             return (requested_settings, None);
         }
         let Some(persisted_model) = persisted_model else {
@@ -1032,7 +1030,10 @@ mod tests {
         assert_eq!(fallback, None);
         assert_eq!(resume_config.model.as_deref(), Some(saved_model.as_str()));
         assert_eq!(resume_config.model_provider_id, provider_id);
-        assert_eq!(resume_config.model_reasoning_effort, Some(ReasoningEffort::High));
+        assert_eq!(
+            resume_config.model_reasoning_effort,
+            Some(ReasoningEffort::High)
+        );
     }
 
     #[tokio::test]
