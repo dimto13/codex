@@ -14,29 +14,51 @@ use crate::cwd_prompt::CwdPromptOutcome;
 use crate::cwd_prompt::CwdSelection;
 use crate::tui::Tui;
 use codex_protocol::ThreadId;
+use codex_protocol::openai_models::ReasoningEffort;
 use codex_rollout::open_rollout_line_reader;
 use codex_state::StateRuntime;
 use codex_utils_path as path_utils;
 use serde::Deserialize;
 use serde_json::Value;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SessionModelState {
+    pub(crate) model: String,
+    pub(crate) model_provider: Option<String>,
+    pub(crate) reasoning_effort: Option<ReasoningEffort>,
+}
+
 #[derive(Default)]
 struct RolloutResumeState {
     thread_id: Option<ThreadId>,
     cwd: Option<PathBuf>,
     model: Option<String>,
+    model_provider: Option<String>,
+    reasoning_effort: Option<ReasoningEffort>,
 }
 
 #[derive(Deserialize)]
 struct SessionMetadata {
     id: ThreadId,
     cwd: PathBuf,
+    #[serde(default)]
+    model_provider: Option<String>,
 }
 
 #[derive(Deserialize)]
 struct TurnContextResumeState {
     cwd: PathBuf,
     model: String,
+    #[serde(default)]
+    effort: Option<ReasoningEffort>,
+}
+
+#[derive(Deserialize)]
+struct ThreadSettingsResumeState {
+    model: String,
+    model_provider_id: String,
+    #[serde(default)]
+    reasoning_effort: Option<ReasoningEffort>,
 }
 
 #[derive(Deserialize)]
@@ -69,18 +91,38 @@ pub(crate) async fn read_session_model(
     thread_id: ThreadId,
     path: Option<&Path>,
 ) -> Option<String> {
+    read_session_model_state(state_db_ctx, thread_id, path)
+        .await
+        .map(|state| state.model)
+}
+
+pub(crate) async fn read_session_model_state(
+    state_db_ctx: Option<&StateRuntime>,
+    thread_id: ThreadId,
+    path: Option<&Path>,
+) -> Option<SessionModelState> {
     if let Some(state_db_ctx) = state_db_ctx
         && let Ok(Some(metadata)) = state_db_ctx.get_thread(thread_id).await
         && let Some(model) = metadata.model
     {
-        return Some(model);
+        return Some(SessionModelState {
+            model,
+            model_provider: Some(metadata.model_provider),
+            reasoning_effort: metadata.reasoning_effort,
+        });
     }
 
     let path = path?;
     read_rollout_resume_state(path)
         .await
         .ok()
-        .and_then(|state| state.model)
+        .and_then(|state| {
+            state.model.map(|model| SessionModelState {
+                model,
+                model_provider: state.model_provider,
+                reasoning_effort: state.reasoning_effort,
+            })
+        })
 }
 
 pub(crate) async fn resolve_cwd_for_resume_or_fork(
@@ -141,6 +183,23 @@ pub(crate) fn cwds_differ(current_cwd: &Path, session_cwd: &Path) -> bool {
     !path_utils::paths_match_after_normalization(current_cwd, session_cwd)
 }
 
+fn apply_thread_settings_resume_state(state: &mut RolloutResumeState, payload: &Value) {
+    if payload.get("type").and_then(Value::as_str) != Some("thread_settings_applied") {
+        return;
+    }
+    let Some(thread_settings) = payload.get("thread_settings") else {
+        return;
+    };
+    let Ok(thread_settings) =
+        serde_json::from_value::<ThreadSettingsResumeState>(thread_settings.clone())
+    else {
+        return;
+    };
+    state.model = Some(thread_settings.model);
+    state.model_provider = Some(thread_settings.model_provider_id);
+    state.reasoning_effort = thread_settings.reasoning_effort;
+}
+
 async fn read_rollout_resume_state(path: &Path) -> io::Result<RolloutResumeState> {
     let mut reader = open_rollout_line_reader(path).await?;
     let mut state = RolloutResumeState::default();
@@ -164,6 +223,9 @@ async fn read_rollout_resume_state(path: &Path) -> io::Result<RolloutResumeState
                 if let Ok(metadata) = serde_json::from_value::<SessionMetadata>(payload) {
                     state.thread_id = Some(metadata.id);
                     state.cwd.get_or_insert(metadata.cwd);
+                    if metadata.model_provider.is_some() {
+                        state.model_provider = metadata.model_provider;
+                    }
                 }
             }
             "turn_context" => {
@@ -171,8 +233,10 @@ async fn read_rollout_resume_state(path: &Path) -> io::Result<RolloutResumeState
                 {
                     state.cwd = Some(turn_context.cwd);
                     state.model = Some(turn_context.model);
+                    state.reasoning_effort = turn_context.effort;
                 }
             }
+            "event_msg" => apply_thread_settings_resume_state(&mut state, &payload),
             _ => {}
         }
     }
@@ -232,17 +296,26 @@ mod tests {
                         "cwd": original,
                         "originator": "test",
                         "cli_version": "test",
+                        "model_provider": "openai",
                     }),
                 ),
                 rollout_line(
                     "t1",
                     "turn_context",
-                    serde_json::json!({ "cwd": temp_dir.path().join("middle"), "model": "middle" }),
+                    serde_json::json!({
+                        "cwd": temp_dir.path().join("middle"),
+                        "model": "middle",
+                        "effort": "low",
+                    }),
                 ),
                 rollout_line(
                     "t2",
                     "turn_context",
-                    serde_json::json!({ "cwd": latest.clone(), "model": "latest" }),
+                    serde_json::json!({
+                        "cwd": latest.clone(),
+                        "model": "latest",
+                        "effort": "high",
+                    }),
                 ),
             ],
         )?;
@@ -252,6 +325,60 @@ mod tests {
         assert_eq!(state.thread_id, Some(thread_id));
         assert_eq!(state.cwd, Some(latest));
         assert_eq!(state.model, Some("latest".to_string()));
+        assert_eq!(state.model_provider, Some("openai".to_string()));
+        assert_eq!(state.reasoning_effort, Some(ReasoningEffort::High));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn rollout_resume_state_prefers_latest_thread_settings_bundle() -> std::io::Result<()> {
+        let temp_dir = TempDir::new()?;
+        let thread_id = ThreadId::new();
+        let cwd = temp_dir.path().join("session");
+        let rollout_path = temp_dir.path().join("rollout.jsonl");
+        write_rollout_lines(
+            &rollout_path,
+            &[
+                rollout_line(
+                    "t0",
+                    "session_meta",
+                    serde_json::json!({
+                        "id": thread_id,
+                        "cwd": cwd.clone(),
+                        "originator": "test",
+                        "cli_version": "test",
+                        "model_provider": "openai",
+                    }),
+                ),
+                rollout_line(
+                    "t1",
+                    "turn_context",
+                    serde_json::json!({
+                        "cwd": cwd,
+                        "model": "gpt-before",
+                        "effort": "low",
+                    }),
+                ),
+                rollout_line(
+                    "t2",
+                    "event_msg",
+                    serde_json::json!({
+                        "type": "thread_settings_applied",
+                        "thread_settings": {
+                            "model": "local-model",
+                            "model_provider_id": "ollama",
+                            "reasoning_effort": "medium"
+                        }
+                    }),
+                ),
+            ],
+        )?;
+
+        let state = read_rollout_resume_state(&rollout_path).await?;
+
+        assert_eq!(state.model, Some("local-model".to_string()));
+        assert_eq!(state.model_provider, Some("ollama".to_string()));
+        assert_eq!(state.reasoning_effort, Some(ReasoningEffort::Medium));
         Ok(())
     }
 
@@ -271,6 +398,7 @@ mod tests {
                     "cwd": cwd.clone(),
                     "originator": "test",
                     "cli_version": "test",
+                    "model_provider": "openai",
                 }),
             )],
         )?;
@@ -280,6 +408,8 @@ mod tests {
         assert_eq!(state.thread_id, Some(thread_id));
         assert_eq!(state.cwd, Some(cwd));
         assert_eq!(state.model, None);
+        assert_eq!(state.model_provider, Some("openai".to_string()));
+        assert_eq!(state.reasoning_effort, None);
         Ok(())
     }
 
