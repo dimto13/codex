@@ -66,3 +66,50 @@ jobs:
       - name: Check for a clean worktree
         if: always() && !cancelled()
         uses: ./.github/actions/check-clean-worktree
+
+  u1-dependency-lock-generator:
+    name: U1 dependency lock generator
+    if: github.event_name == 'pull_request' && github.head_ref == 'fix/cargo-deny-security-baseline'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+      - name: Prepare Bazel CI
+        uses: ./.github/actions/prepare-bazel-ci
+        with:
+          target: x86_64-unknown-linux-gnu
+          cache-scope: u1-dependency-lock-generator
+      - name: Apply targeted Cargo security updates
+        working-directory: codex-rs
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo update -p h2@0.4.13 --precise 0.4.16
+          cargo update -p webbrowser@1.0.6 --precise 1.2.2
+      - name: Regenerate Bazel lock state
+        shell: bash
+        run: just bazel-lock-update
+      - name: Verify generator scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          unexpected="$(git diff --name-only | grep -Ev '^(codex-rs/Cargo.lock|MODULE.bazel.lock)$' || true)"
+          if [[ -n "${unexpected}" ]]; then
+            echo "Generator changed files outside U1 lock scope:" >&2
+            echo "${unexpected}" >&2
+            exit 1
+          fi
+          git diff --stat
+      - name: Upload generated U1 lockfiles
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: u1-generated-lockfiles-${{ github.event.pull_request.head.sha }}
+          path: |
+            codex-rs/Cargo.lock
+            MODULE.bazel.lock
+          if-no-files-found: error
+          retention-days: 1
