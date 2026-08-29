@@ -70,11 +70,14 @@ jobs:
   u1-dependency-lock-generator:
     name: U1 dependency lock generator
     if: github.event_name == 'pull_request' && github.head_ref == 'fix/cargo-deny-security-baseline'
+    permissions:
+      contents: write
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
       - name: Prepare Bazel CI
@@ -113,3 +116,34 @@ jobs:
             MODULE.bazel.lock
           if-no-files-found: error
           retention-days: 1
+      - name: Commit generated lockfiles and remove temporary generator
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_BRANCH: ${{ github.head_ref }}
+          REPOSITORY: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git checkout "${BASE_SHA}" -- .github/workflows/blocking-ci.yml
+          mapfile -t changed_files < <(git diff --name-only "${BASE_SHA}")
+          if [[ ${#changed_files[@]} -ne 2 ]]; then
+            printf 'Final U1 diff has unexpected file count: %s\n' "${#changed_files[@]}" >&2
+            printf '%s\n' "${changed_files[@]}" >&2
+            exit 1
+          fi
+          for changed_file in "${changed_files[@]}"; do
+            case "${changed_file}" in
+              codex-rs/Cargo.lock|MODULE.bazel.lock) ;;
+              *)
+                echo "Final U1 diff contains unexpected file: ${changed_file}" >&2
+                exit 1
+                ;;
+            esac
+          done
+          git diff --check "${BASE_SHA}"
+          git add codex-rs/Cargo.lock MODULE.bazel.lock .github/workflows/blocking-ci.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'chore(deps): patch RustSec advisories'
+          git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPOSITORY}.git" "HEAD:${HEAD_BRANCH}"
