@@ -1,0 +1,114 @@
+name: q1-local-provider-validation
+
+on:
+  push:
+    branches:
+      - fix/resume-session-model
+
+permissions:
+  contents: write
+
+jobs:
+  validate-and-finalize:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: codex-rs
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: ./.github/actions/setup-ci
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+        with:
+          components: clippy,rustfmt
+      - uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532 # v2.62.49
+        with:
+          tool: cargo-nextest@0.9.143
+      - name: Add configured local provider regression
+        working-directory: .
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("codex-rs/tui/src/app/session_lifecycle.rs")
+          text = path.read_text()
+          test_name = "resume_model_restore_preserves_configured_local_provider_model"
+          if test_name in text:
+              raise SystemExit(f"{test_name} already exists")
+          anchor = """    #[tokio::test]\n    async fn resume_model_restore_preserves_explicit_current_override() {"""
+          if anchor not in text:
+              raise SystemExit("expected Q1 test anchor not found")
+          test = """    #[tokio::test]
+          async fn resume_model_restore_preserves_configured_local_provider_model() {
+              let app = make_test_app().await;
+              let mut resume_config = app.config.clone();
+              let local_provider_id = "ollama".to_string();
+              let local_provider = resume_config.model_provider.clone();
+              resume_config
+                  .model_providers
+                  .insert(local_provider_id.clone(), local_provider);
+              resume_config.model = Some("current-default".to_string());
+              resume_config.model_reasoning_effort = Some(ReasoningEffort::Low);
+              let saved_model = "local-model:custom".to_string();
+              let saved = crate::session_resume::SessionModelState {
+                  model: saved_model.clone(),
+                  model_provider: Some(local_provider_id.clone()),
+                  reasoning_effort: Some(ReasoningEffort::High),
+              };
+
+              let (settings, fallback) = app.prepare_model_settings_for_resume(
+                  &mut resume_config,
+                  crate::app_server_session::ResumeModelSettings::RestoreFromThread,
+                  Some(saved),
+              );
+
+              assert_eq!(
+                  settings,
+                  crate::app_server_session::ResumeModelSettings::OverrideFromCurrentConfig
+              );
+              assert_eq!(fallback, None);
+              assert_eq!(resume_config.model.as_deref(), Some(saved_model.as_str()));
+              assert_eq!(resume_config.model_provider_id, local_provider_id);
+              assert_eq!(
+                  resume_config.model_reasoning_effort,
+                  Some(ReasoningEffort::High)
+              );
+          }
+
+          """
+          path.write_text(text.replace(anchor, test + anchor, 1))
+          PY
+      - name: Run resume lifecycle regression tests
+        run: just test -p codex-tui resume_model
+      - name: Run rollout resume regression tests
+        run: just test -p codex-tui session_resume::tests
+      - name: Run codex-tui fix
+        run: just fix -p codex-tui
+      - name: Install uv for repository formatter
+        working-directory: .
+        run: python3 -m pip install --break-system-packages uv
+      - name: Run repository formatter
+        run: just fmt
+      - name: Reconcile finalizer scope
+        working-directory: .
+        run: |
+          git diff --name-only | while read -r path; do
+            case "$path" in
+              codex-rs/tui/src/app/session_lifecycle.rs|codex-rs/tui/src/session_resume.rs) ;;
+              *) git checkout -- "$path" ;;
+            esac
+          done
+          unexpected="$(git diff --name-only | grep -Ev '^(codex-rs/tui/src/app/session_lifecycle.rs|codex-rs/tui/src/session_resume.rs)$' || true)"
+          if [ -n "$unexpected" ]; then
+            printf 'Unexpected Q1 finalizer changes:\n%s\n' "$unexpected" >&2
+            exit 1
+          fi
+          git diff --check
+      - name: Commit Q1 regression and remove helper workflow
+        working-directory: .
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add codex-rs/tui/src/app/session_lifecycle.rs codex-rs/tui/src/session_resume.rs
+          git rm .github/workflows/q1-local-provider-validation.yml
+          git commit -m "test(tui): preserve local provider model on resume"
+          git push origin HEAD:fix/resume-session-model
