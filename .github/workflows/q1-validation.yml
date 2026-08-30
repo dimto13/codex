@@ -23,33 +23,28 @@ jobs:
       - uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532 # v2.62.49
         with:
           tool: cargo-nextest@0.9.143
-      - name: Install uv for repository formatter
-        working-directory: .
-        run: python3 -m pip install --break-system-packages uv
       - name: Run resume lifecycle regression tests
         run: just test -p codex-tui resume_model
       - name: Run rollout resume regression tests
         run: just test -p codex-tui session_resume::tests
-      - name: Run codex-tui fix
-        run: just fix -p codex-tui
-      - name: Run repository formatter
-        run: just fmt
-      - name: Verify finalizer scope
+      - name: Format Q1 Rust sources
+        working-directory: .
+        run: rustfmt --edition 2024 codex-rs/tui/src/app/session_lifecycle.rs codex-rs/tui/src/session_resume.rs
+      - name: Verify Q1 source scope
         working-directory: .
         run: |
           unexpected="$(git diff --name-only | grep -Ev '^(codex-rs/tui/src/app/session_lifecycle.rs|codex-rs/tui/src/session_resume.rs)$' || true)"
           if [ -n "$unexpected" ]; then
-            printf 'Unexpected formatter/fix changes:\n%s\n' "$unexpected" >&2
+            printf 'Unexpected formatter changes:\n%s\n' "$unexpected" >&2
             exit 1
           fi
           git diff --check
-      - name: Commit repo-tooling changes
+      - name: Commit formatting and remove helper workflow
         working-directory: .
         run: |
-          if ! git diff --quiet; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add codex-rs/tui/src/app/session_lifecycle.rs codex-rs/tui/src/session_resume.rs
-            git commit -m "chore(tui): apply repo fix and formatting"
-            git push origin HEAD:fix/resume-session-model
-          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add codex-rs/tui/src/app/session_lifecycle.rs codex-rs/tui/src/session_resume.rs
+          git rm .github/workflows/q1-validation.yml
+          git commit -m "chore(tui): apply Q1 formatting"
+          git push origin HEAD:fix/resume-session-model
