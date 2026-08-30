@@ -6,6 +6,21 @@
 
 use super::*;
 
+fn resume_model_fallback_message(
+    saved: &crate::session_resume::SessionModelState,
+    resumed_model: &str,
+) -> String {
+    let provider_suffix = saved
+        .model_provider
+        .as_deref()
+        .map(|provider| format!(" from provider `{provider}`"))
+        .unwrap_or_default();
+    format!(
+        "Saved model `{}`{provider_suffix} is unavailable; resumed with `{resumed_model}`.",
+        saved.model
+    )
+}
+
 impl App {
     pub(super) async fn open_agent_picker(&mut self, app_server: &mut AppServerSession) {
         self.backfill_loaded_subagent_threads(app_server).await;
@@ -872,15 +887,7 @@ impl App {
             Ok(resumed) => {
                 let resumed_thread_id = resumed.session.thread_id;
                 let fallback_message = model_fallback.as_ref().map(|saved| {
-                    let provider_suffix = saved
-                        .model_provider
-                        .as_deref()
-                        .map(|provider| format!(" from provider `{provider}`"))
-                        .unwrap_or_default();
-                    format!(
-                        "Saved model `{}`{provider_suffix} is unavailable; resumed with `{}`.",
-                        saved.model, resumed.session.model
-                    )
+                    resume_model_fallback_message(saved, &resumed.session.model)
                 });
                 self.shutdown_current_thread(app_server).await;
                 self.config = resume_config;
@@ -1105,6 +1112,20 @@ mod tests {
         );
         assert_eq!(fallback, Some(saved));
         assert_eq!(resume_config.model, Some(default_model));
+    }
+
+    #[test]
+    fn resume_model_fallback_message_snapshot() {
+        let saved = crate::session_resume::SessionModelState {
+            model: "retired-model".to_string(),
+            model_provider: Some("openai".to_string()),
+            reasoning_effort: Some(ReasoningEffort::High),
+        };
+
+        insta::assert_snapshot!(
+            resume_model_fallback_message(&saved, "current-default"),
+            @"Saved model `retired-model` from provider `openai` is unavailable; resumed with `current-default`."
+        );
     }
 
     #[tokio::test]
