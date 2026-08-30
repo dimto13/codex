@@ -6,6 +6,21 @@
 
 use super::*;
 
+fn resume_model_fallback_message(
+    saved: &crate::session_resume::SessionModelState,
+    resumed_model: &str,
+) -> String {
+    let provider_suffix = saved
+        .model_provider
+        .as_deref()
+        .map(|provider| format!(" from provider `{provider}`"))
+        .unwrap_or_default();
+    format!(
+        "Saved model `{}`{provider_suffix} is unavailable; resumed with `{resumed_model}`.",
+        saved.model
+    )
+}
+
 impl App {
     pub(super) async fn open_agent_picker(&mut self, app_server: &mut AppServerSession) {
         self.backfill_loaded_subagent_threads(app_server).await;
@@ -734,6 +749,59 @@ impl App {
         config.service_tier = self.chat_widget.configured_service_tier();
         config
     }
+
+    fn prepare_model_settings_for_resume(
+        &self,
+        resume_config: &mut Config,
+        requested_settings: crate::app_server_session::ResumeModelSettings,
+        persisted_model: Option<crate::session_resume::SessionModelState>,
+    ) -> (
+        crate::app_server_session::ResumeModelSettings,
+        Option<crate::session_resume::SessionModelState>,
+    ) {
+        if requested_settings != crate::app_server_session::ResumeModelSettings::RestoreFromThread {
+            return (requested_settings, None);
+        }
+        let Some(persisted_model) = persisted_model else {
+            return (requested_settings, None);
+        };
+
+        let provider_id = persisted_model
+            .model_provider
+            .clone()
+            .unwrap_or_else(|| resume_config.model_provider_id.clone());
+        let Some(provider) = resume_config.model_providers.get(&provider_id).cloned() else {
+            return (
+                crate::app_server_session::ResumeModelSettings::OverrideFromCurrentConfig,
+                Some(persisted_model),
+            );
+        };
+        let model_is_available = if provider_id == "openai" {
+            self.model_catalog
+                .try_list_models()
+                .expect("model catalog is infallible")
+                .iter()
+                .any(|preset| preset.model == persisted_model.model)
+        } else {
+            true
+        };
+        if !model_is_available {
+            return (
+                crate::app_server_session::ResumeModelSettings::OverrideFromCurrentConfig,
+                Some(persisted_model),
+            );
+        }
+
+        resume_config.model = Some(persisted_model.model.clone());
+        resume_config.model_provider_id = provider_id;
+        resume_config.model_provider = provider;
+        resume_config.model_reasoning_effort = persisted_model.reasoning_effort;
+        (
+            crate::app_server_session::ResumeModelSettings::OverrideFromCurrentConfig,
+            None,
+        )
+    }
+
     pub(super) async fn resume_target_session(
         &mut self,
         tui: &mut tui::Tui,
@@ -782,6 +850,26 @@ impl App {
         };
         self.apply_runtime_policy_overrides(&mut resume_config);
 
+        let requested_model_settings = self.resume_model_settings();
+        let persisted_model = if requested_model_settings
+            == crate::app_server_session::ResumeModelSettings::RestoreFromThread
+            && !self.app_server_target.uses_remote_workspace()
+        {
+            crate::session_resume::read_session_model_state(
+                self.state_db.as_deref(),
+                target_session.thread_id,
+                target_session.path.as_deref(),
+            )
+            .await
+        } else {
+            None
+        };
+        let (resume_model_settings, model_fallback) = self.prepare_model_settings_for_resume(
+            &mut resume_config,
+            requested_model_settings,
+            persisted_model,
+        );
+
         let summary = session_summary(
             self.chat_widget.token_usage(),
             self.chat_widget.thread_id(),
@@ -792,12 +880,15 @@ impl App {
             .resume_thread(
                 resume_config.clone(),
                 target_session.thread_id,
-                self.resume_model_settings(),
+                resume_model_settings,
             )
             .await
         {
             Ok(resumed) => {
                 let resumed_thread_id = resumed.session.thread_id;
+                let fallback_message = model_fallback
+                    .as_ref()
+                    .map(|saved| resume_model_fallback_message(saved, &resumed.session.model));
                 self.shutdown_current_thread(app_server).await;
                 self.config = resume_config;
                 tui.set_notification_settings(
@@ -813,6 +904,9 @@ impl App {
                     .await
                 {
                     Ok(()) => {
+                        if let Some(message) = fallback_message {
+                            self.chat_widget.add_info_message(message, /*hint*/ None);
+                        }
                         if let Some(summary) = summary {
                             let mut lines: Vec<Line<'static>> = Vec::new();
                             if let Some(usage_line) = summary.usage_line {
@@ -853,6 +947,8 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::test_support::make_test_app;
+    use codex_protocol::openai_models::ReasoningEffort;
 
     #[test]
     fn terminal_thread_read_error_detection_matches_not_loaded_errors() {
@@ -905,5 +1001,192 @@ mod tests {
 
         assert!(App::can_fallback_from_include_turns_error(&unmaterialized));
         assert!(App::can_fallback_from_include_turns_error(&ephemeral));
+    }
+
+    #[tokio::test]
+    async fn resume_model_restore_applies_persisted_model_bundle() {
+        let app = make_test_app().await;
+        let mut resume_config = app.config.clone();
+        let provider_id = resume_config.model_provider_id.clone();
+        let saved_model = app
+            .model_catalog
+            .try_list_models()
+            .expect("model catalog")
+            .first()
+            .expect("test model catalog should not be empty")
+            .model
+            .clone();
+        resume_config.model = Some("different-default".to_string());
+        resume_config.model_reasoning_effort = Some(ReasoningEffort::Low);
+        let saved = crate::session_resume::SessionModelState {
+            model: saved_model.clone(),
+            model_provider: Some(provider_id.clone()),
+            reasoning_effort: Some(ReasoningEffort::High),
+        };
+
+        let (settings, fallback) = app.prepare_model_settings_for_resume(
+            &mut resume_config,
+            crate::app_server_session::ResumeModelSettings::RestoreFromThread,
+            Some(saved),
+        );
+
+        assert_eq!(
+            settings,
+            crate::app_server_session::ResumeModelSettings::OverrideFromCurrentConfig
+        );
+        assert_eq!(fallback, None);
+        assert_eq!(resume_config.model.as_deref(), Some(saved_model.as_str()));
+        assert_eq!(resume_config.model_provider_id, provider_id);
+        assert_eq!(
+            resume_config.model_reasoning_effort,
+            Some(ReasoningEffort::High)
+        );
+    }
+
+    #[tokio::test]
+    async fn resume_model_restore_preserves_configured_local_provider_model() {
+        let app = make_test_app().await;
+        let mut resume_config = app.config.clone();
+        let local_provider_id = "ollama".to_string();
+        let local_provider = resume_config.model_provider.clone();
+        resume_config
+            .model_providers
+            .insert(local_provider_id.clone(), local_provider);
+        resume_config.model = Some("current-default".to_string());
+        resume_config.model_reasoning_effort = Some(ReasoningEffort::Low);
+        let saved_model = "local-model:custom".to_string();
+        let saved = crate::session_resume::SessionModelState {
+            model: saved_model.clone(),
+            model_provider: Some(local_provider_id.clone()),
+            reasoning_effort: Some(ReasoningEffort::High),
+        };
+
+        let (settings, fallback) = app.prepare_model_settings_for_resume(
+            &mut resume_config,
+            crate::app_server_session::ResumeModelSettings::RestoreFromThread,
+            Some(saved),
+        );
+
+        assert_eq!(
+            settings,
+            crate::app_server_session::ResumeModelSettings::OverrideFromCurrentConfig
+        );
+        assert_eq!(fallback, None);
+        assert_eq!(resume_config.model.as_deref(), Some(saved_model.as_str()));
+        assert_eq!(resume_config.model_provider_id, local_provider_id);
+        assert_eq!(
+            resume_config.model_reasoning_effort,
+            Some(ReasoningEffort::High)
+        );
+    }
+
+    #[tokio::test]
+    async fn resume_model_restore_preserves_explicit_current_override() {
+        let app = make_test_app().await;
+        let mut resume_config = app.config.clone();
+        resume_config.model = Some("explicit-current".to_string());
+        let saved = crate::session_resume::SessionModelState {
+            model: "persisted-model".to_string(),
+            model_provider: Some(resume_config.model_provider_id.clone()),
+            reasoning_effort: Some(ReasoningEffort::High),
+        };
+
+        let (settings, fallback) = app.prepare_model_settings_for_resume(
+            &mut resume_config,
+            crate::app_server_session::ResumeModelSettings::OverrideFromCurrentConfig,
+            Some(saved),
+        );
+
+        assert_eq!(
+            settings,
+            crate::app_server_session::ResumeModelSettings::OverrideFromCurrentConfig
+        );
+        assert_eq!(fallback, None);
+        assert_eq!(resume_config.model.as_deref(), Some("explicit-current"));
+    }
+
+    #[tokio::test]
+    async fn resume_model_restore_keeps_default_for_legacy_session_without_model() {
+        let app = make_test_app().await;
+        let mut resume_config = app.config.clone();
+        resume_config.model = Some("current-default".to_string());
+
+        let (settings, fallback) = app.prepare_model_settings_for_resume(
+            &mut resume_config,
+            crate::app_server_session::ResumeModelSettings::RestoreFromThread,
+            None,
+        );
+
+        assert_eq!(
+            settings,
+            crate::app_server_session::ResumeModelSettings::RestoreFromThread
+        );
+        assert_eq!(fallback, None);
+        assert_eq!(resume_config.model.as_deref(), Some("current-default"));
+    }
+
+    #[tokio::test]
+    async fn resume_model_restore_falls_back_when_persisted_model_is_unavailable() {
+        let app = make_test_app().await;
+        let mut resume_config = app.config.clone();
+        let default_model = "current-default".to_string();
+        resume_config.model = Some(default_model.clone());
+        let saved = crate::session_resume::SessionModelState {
+            model: "retired-model".to_string(),
+            model_provider: Some("openai".to_string()),
+            reasoning_effort: Some(ReasoningEffort::High),
+        };
+
+        let (settings, fallback) = app.prepare_model_settings_for_resume(
+            &mut resume_config,
+            crate::app_server_session::ResumeModelSettings::RestoreFromThread,
+            Some(saved.clone()),
+        );
+
+        assert_eq!(
+            settings,
+            crate::app_server_session::ResumeModelSettings::OverrideFromCurrentConfig
+        );
+        assert_eq!(fallback, Some(saved));
+        assert_eq!(resume_config.model, Some(default_model));
+    }
+
+    #[test]
+    fn resume_model_fallback_message_snapshot() {
+        let saved = crate::session_resume::SessionModelState {
+            model: "retired-model".to_string(),
+            model_provider: Some("openai".to_string()),
+            reasoning_effort: Some(ReasoningEffort::High),
+        };
+
+        insta::assert_snapshot!(
+            resume_model_fallback_message(&saved, "current-default"),
+            @"Saved model `retired-model` from provider `openai` is unavailable; resumed with `current-default`."
+        );
+    }
+
+    #[tokio::test]
+    async fn resume_model_restore_falls_back_when_persisted_provider_is_unavailable() {
+        let app = make_test_app().await;
+        let mut resume_config = app.config.clone();
+        let default_model = resume_config.model.clone();
+        let saved = crate::session_resume::SessionModelState {
+            model: "local-model".to_string(),
+            model_provider: Some("missing-provider".to_string()),
+            reasoning_effort: Some(ReasoningEffort::Medium),
+        };
+
+        let (settings, fallback) = app.prepare_model_settings_for_resume(
+            &mut resume_config,
+            crate::app_server_session::ResumeModelSettings::RestoreFromThread,
+            Some(saved.clone()),
+        );
+
+        assert_eq!(
+            settings,
+            crate::app_server_session::ResumeModelSettings::OverrideFromCurrentConfig
+        );
+        assert_eq!(fallback, Some(saved));
+        assert_eq!(resume_config.model, default_model);
     }
 }
