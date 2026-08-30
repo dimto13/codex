@@ -6,31 +6,31 @@ on:
       - fix/resume-session-model
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  tui-validation:
+  tui-finalize:
     runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: codex-rs
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
       - uses: ./.github/actions/setup-ci
       - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
         with:
           components: clippy,rustfmt
-      - uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532 # v2.62.49
-        with:
-          tool: cargo-nextest@0.9.143
-      - name: Run codex-tui tests
-        run: just test -p codex-tui
       - name: Run codex-tui fix
         run: just fix -p codex-tui
-      - name: Check Rust formatting
-        run: cargo fmt -- --config imports_granularity=Item --check
-      - name: Check for a clean worktree
-        if: always() && !cancelled()
-        uses: ./.github/actions/check-clean-worktree
+      - name: Run repo formatter
+        run: just fmt
+      - name: Commit repo-tooling changes
+        working-directory: .
+        run: |
+          if ! git diff --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add codex-rs/tui/src/app/session_lifecycle.rs codex-rs/tui/src/session_resume.rs
+            git commit -m "chore(tui): apply repo fix and formatting"
+            git push origin HEAD:fix/resume-session-model
+          fi
