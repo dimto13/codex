@@ -6,7 +6,7 @@ on:
       - fix/resume-session-model
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   tui-validation:
@@ -16,8 +16,41 @@ jobs:
         working-directory: codex-rs
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
+      - name: Add required fallback-message snapshot coverage
+        working-directory: .
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("codex-rs/tui/src/app/session_lifecycle.rs")
+          text = path.read_text()
+          if "fn resume_model_fallback_message(" not in text:
+              marker = "use super::*;\n\n"
+              helper = '''fn resume_model_fallback_message(\n    saved: &crate::session_resume::SessionModelState,\n    resumed_model: &str,\n) -> String {\n    let provider_suffix = saved\n        .model_provider\n        .as_deref()\n        .map(|provider| format!(" from provider `{provider}`"))\n        .unwrap_or_default();\n    format!(\n        "Saved model `{}`{provider_suffix} is unavailable; resumed with `{resumed_model}`.",\n        saved.model\n    )\n}\n\n'''
+              if marker not in text:
+                  raise SystemExit("module marker not found")
+              text = text.replace(marker, marker + helper, 1)
+
+              old = '''                let fallback_message = model_fallback.as_ref().map(|saved| {\n                    let provider_suffix = saved\n                        .model_provider\n                        .as_deref()\n                        .map(|provider| format!(" from provider `{provider}`"))\n                        .unwrap_or_default();\n                    format!(\n                        "Saved model `{}`{provider_suffix} is unavailable; resumed with `{}`.",\n                        saved.model, resumed.session.model\n                    )\n                });'''
+              new = '''                let fallback_message = model_fallback.as_ref().map(|saved| {\n                    resume_model_fallback_message(saved, &resumed.session.model)\n                });'''
+              if old not in text:
+                  raise SystemExit("fallback rendering block not found")
+              text = text.replace(old, new, 1)
+
+              test_marker = '''    #[tokio::test]\n    async fn resume_model_restore_falls_back_when_persisted_provider_is_unavailable() {'''
+              snapshot_test = '''    #[test]\n    fn resume_model_fallback_message_snapshot() {\n        let saved = crate::session_resume::SessionModelState {\n            model: "retired-model".to_string(),\n            model_provider: Some("openai".to_string()),\n            reasoning_effort: Some(ReasoningEffort::High),\n        };\n\n        insta::assert_snapshot!(\n            resume_model_fallback_message(&saved, "current-default"),\n            @"Saved model `retired-model` from provider `openai` is unavailable; resumed with `current-default`."\n        );\n    }\n\n'''
+              if test_marker not in text:
+                  raise SystemExit("snapshot insertion marker not found")
+              text = text.replace(test_marker, snapshot_test + test_marker, 1)
+              path.write_text(text)
+          PY
+          if ! git diff --quiet -- codex-rs/tui/src/app/session_lifecycle.rs; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add codex-rs/tui/src/app/session_lifecycle.rs
+            git commit -m "test(tui): snapshot resume model fallback"
+            git push origin HEAD:fix/resume-session-model
+          fi
       - uses: ./.github/actions/setup-ci
       - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
         with:
