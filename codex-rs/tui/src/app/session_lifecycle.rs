@@ -795,7 +795,7 @@ impl App {
         resume_config.model = Some(persisted_model.model.clone());
         resume_config.model_provider_id = provider_id;
         resume_config.model_provider = provider;
-        resume_config.model_reasoning_effort = persisted_model.reasoning_effort.clone();
+        resume_config.model_reasoning_effort = persisted_model.reasoning_effort;
         (
             crate::app_server_session::ResumeModelSettings::OverrideFromCurrentConfig,
             None,
@@ -1037,6 +1037,43 @@ mod tests {
         assert_eq!(fallback, None);
         assert_eq!(resume_config.model.as_deref(), Some(saved_model.as_str()));
         assert_eq!(resume_config.model_provider_id, provider_id);
+        assert_eq!(
+            resume_config.model_reasoning_effort,
+            Some(ReasoningEffort::High)
+        );
+    }
+
+    #[tokio::test]
+    async fn resume_model_restore_preserves_configured_local_provider_model() {
+        let app = make_test_app().await;
+        let mut resume_config = app.config.clone();
+        let local_provider_id = "ollama".to_string();
+        let local_provider = resume_config.model_provider.clone();
+        resume_config
+            .model_providers
+            .insert(local_provider_id.clone(), local_provider);
+        resume_config.model = Some("current-default".to_string());
+        resume_config.model_reasoning_effort = Some(ReasoningEffort::Low);
+        let saved_model = "local-model:custom".to_string();
+        let saved = crate::session_resume::SessionModelState {
+            model: saved_model.clone(),
+            model_provider: Some(local_provider_id.clone()),
+            reasoning_effort: Some(ReasoningEffort::High),
+        };
+
+        let (settings, fallback) = app.prepare_model_settings_for_resume(
+            &mut resume_config,
+            crate::app_server_session::ResumeModelSettings::RestoreFromThread,
+            Some(saved),
+        );
+
+        assert_eq!(
+            settings,
+            crate::app_server_session::ResumeModelSettings::OverrideFromCurrentConfig
+        );
+        assert_eq!(fallback, None);
+        assert_eq!(resume_config.model.as_deref(), Some(saved_model.as_str()));
+        assert_eq!(resume_config.model_provider_id, local_provider_id);
         assert_eq!(
             resume_config.model_reasoning_effort,
             Some(ReasoningEffort::High)
