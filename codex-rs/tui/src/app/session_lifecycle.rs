@@ -886,9 +886,9 @@ impl App {
         {
             Ok(resumed) => {
                 let resumed_thread_id = resumed.session.thread_id;
-                let fallback_message = model_fallback.as_ref().map(|saved| {
-                    resume_model_fallback_message(saved, &resumed.session.model)
-                });
+                let fallback_message = model_fallback
+                    .as_ref()
+                    .map(|saved| resume_model_fallback_message(saved, &resumed.session.model));
                 self.shutdown_current_thread(app_server).await;
                 self.config = resume_config;
                 tui.set_notification_settings(
