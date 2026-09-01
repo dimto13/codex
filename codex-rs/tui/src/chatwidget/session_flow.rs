@@ -1,6 +1,42 @@
 //! Session configuration and thread-header orchestration for `ChatWidget`.
 
 use super::*;
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::LazyLock;
+
+static SESSION_LOOKUP_PROCESS_KEY: LazyLock<String> =
+    LazyLock::new(|| format!("pid-{}-{}", std::process::id(), Uuid::new_v4()));
+
+fn publish_session_lookup(codex_home: &Path, thread_id: ThreadId) -> std::io::Result<PathBuf> {
+    publish_session_lookup_for_process(codex_home, &SESSION_LOOKUP_PROCESS_KEY, thread_id)
+}
+
+fn publish_session_lookup_for_process(
+    codex_home: &Path,
+    process_key: &str,
+    thread_id: ThreadId,
+) -> std::io::Result<PathBuf> {
+    let directory = codex_home.join("aren").join("session-processes");
+    std::fs::create_dir_all(&directory)?;
+    let path = directory.join(format!("{process_key}.json"));
+    let temporary_path = directory.join(format!(".{process_key}.tmp"));
+    let payload = serde_json::to_vec_pretty(&serde_json::json!({
+        "process_key": process_key,
+        "pid": std::process::id(),
+        "thread_id": thread_id.to_string(),
+    }))?;
+    std::fs::write(&temporary_path, payload)?;
+    match std::fs::rename(&temporary_path, &path) {
+        Ok(()) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
+            std::fs::remove_file(&path)?;
+            std::fs::rename(&temporary_path, &path)?;
+        }
+        Err(err) => return Err(err),
+    }
+    Ok(path)
+}
 
 impl ChatWidget {
     fn on_session_configured_with_display_and_fork_parent_title(
@@ -20,6 +56,9 @@ impl ChatWidget {
         self.session_network_proxy = session.network_proxy.clone();
         let previous_thread_id = self.thread_id;
         self.thread_id = Some(session.thread_id);
+        if let Err(err) = publish_session_lookup(&self.config.codex_home, session.thread_id) {
+            tracing::warn!(thread_id = %session.thread_id, %err, "failed to publish session lookup");
+        }
         self.bottom_pane
             .set_queue_submissions(/*queue_submissions*/ false);
         if previous_thread_id != self.thread_id {
@@ -125,6 +164,10 @@ impl ChatWidget {
                 show_fast_status,
             );
             self.apply_session_info_cell(session_info_cell);
+            self.add_info_message(
+                format!("Session ID: {}", session.thread_id),
+                /*hint*/ None,
+            );
         } else if self
             .transcript
             .active_cell
@@ -231,3 +274,7 @@ impl ChatWidget {
         self.bottom_pane.set_skills(skills);
     }
 }
+
+#[cfg(test)]
+#[path = "session_flow_tests.rs"]
+mod tests;
