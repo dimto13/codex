@@ -32,10 +32,10 @@ fn session_lookup_resume_keeps_same_session_id() {
     let home = TempDir::new().expect("temp home");
     let id = thread_id("00000000-0000-0000-0000-000000000502");
 
-    let first = publish_session_lookup_for_process(home.path(), 102, id)
-        .expect("publish new session");
-    let resumed = publish_session_lookup_for_process(home.path(), 102, id)
-        .expect("publish resumed session");
+    let first =
+        publish_session_lookup_for_process(home.path(), 102, id).expect("publish new session");
+    let resumed =
+        publish_session_lookup_for_process(home.path(), 102, id).expect("publish resumed session");
 
     assert_eq!(first, resumed);
     assert_eq!(read_lookup(&resumed)["thread_id"], id.to_string());
