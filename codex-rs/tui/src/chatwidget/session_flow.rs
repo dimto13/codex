@@ -18,7 +18,7 @@ fn publish_session_lookup_for_process(
     process_id: u32,
     thread_id: ThreadId,
 ) -> std::io::Result<PathBuf> {
-    let directory = codex_home.join("session-processes");
+    let directory = codex_home.join("sessions").join("active");
     std::fs::create_dir_all(&directory)?;
     let path = directory.join(format!("{process_id}.json"));
     let payload = serde_json::to_vec_pretty(&serde_json::json!({
