@@ -1,40 +1,37 @@
 //! Session configuration and thread-header orchestration for `ChatWidget`.
 
 use super::*;
+use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
-use std::sync::LazyLock;
 
-static SESSION_LOOKUP_PROCESS_KEY: LazyLock<String> =
-    LazyLock::new(|| format!("pid-{}-{}", std::process::id(), Uuid::new_v4()));
+fn session_id_message(thread_id: ThreadId) -> String {
+    format!("Session ID: {thread_id}")
+}
 
 fn publish_session_lookup(codex_home: &Path, thread_id: ThreadId) -> std::io::Result<PathBuf> {
-    publish_session_lookup_for_process(codex_home, &SESSION_LOOKUP_PROCESS_KEY, thread_id)
+    publish_session_lookup_for_process(codex_home, std::process::id(), thread_id)
 }
 
 fn publish_session_lookup_for_process(
     codex_home: &Path,
-    process_key: &str,
+    process_id: u32,
     thread_id: ThreadId,
 ) -> std::io::Result<PathBuf> {
-    let directory = codex_home.join("aren").join("session-processes");
+    let directory = codex_home.join("session-processes");
     std::fs::create_dir_all(&directory)?;
-    let path = directory.join(format!("{process_key}.json"));
-    let temporary_path = directory.join(format!(".{process_key}.tmp"));
+    let path = directory.join(format!("{process_id}.json"));
     let payload = serde_json::to_vec_pretty(&serde_json::json!({
-        "process_key": process_key,
-        "pid": std::process::id(),
+        "pid": process_id,
         "thread_id": thread_id.to_string(),
-    }))?;
-    std::fs::write(&temporary_path, payload)?;
-    match std::fs::rename(&temporary_path, &path) {
-        Ok(()) => {}
-        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
-            std::fs::remove_file(&path)?;
-            std::fs::rename(&temporary_path, &path)?;
-        }
-        Err(err) => return Err(err),
-    }
+    }))
+    .map_err(std::io::Error::other)?;
+
+    let mut temporary = tempfile::NamedTempFile::new_in(&directory)?;
+    temporary.write_all(&payload)?;
+    temporary.write_all(b"\n")?;
+    temporary.as_file().sync_all()?;
+    temporary.persist(&path).map_err(|err| err.error)?;
     Ok(path)
 }
 
@@ -56,9 +53,6 @@ impl ChatWidget {
         self.session_network_proxy = session.network_proxy.clone();
         let previous_thread_id = self.thread_id;
         self.thread_id = Some(session.thread_id);
-        if let Err(err) = publish_session_lookup(&self.config.codex_home, session.thread_id) {
-            tracing::warn!(thread_id = %session.thread_id, %err, "failed to publish session lookup");
-        }
         self.bottom_pane
             .set_queue_submissions(/*queue_submissions*/ false);
         if previous_thread_id != self.thread_id {
@@ -164,10 +158,6 @@ impl ChatWidget {
                 show_fast_status,
             );
             self.apply_session_info_cell(session_info_cell);
-            self.add_info_message(
-                format!("Session ID: {}", session.thread_id),
-                /*hint*/ None,
-            );
         } else if self
             .transcript
             .active_cell
@@ -194,6 +184,10 @@ impl ChatWidget {
     }
 
     pub(crate) fn handle_thread_session(&mut self, session: ThreadSessionState) {
+        let thread_id = session.thread_id;
+        if let Err(err) = publish_session_lookup(&self.config.codex_home, thread_id) {
+            tracing::warn!(%thread_id, %err, "failed to publish session lookup");
+        }
         self.instruction_source_paths = session.instruction_source_paths.clone();
         let fork_parent_title = session.fork_parent_title.clone();
         self.on_session_configured_with_display_and_fork_parent_title(
@@ -201,6 +195,7 @@ impl ChatWidget {
             SessionConfiguredDisplay::Normal,
             fork_parent_title,
         );
+        self.add_info_message(session_id_message(thread_id), /*hint*/ None);
     }
 
     pub(crate) fn handle_thread_session_quiet(&mut self, session: ThreadSessionState) {
