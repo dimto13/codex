@@ -19,7 +19,10 @@ fn session_lookup_publishes_new_session_immediately() {
     let path = publish_session_lookup_for_process(home.path(), 101, id).expect("publish lookup");
     let value = read_lookup(&path);
 
-    assert_eq!(path, home.path().join("session-processes").join("101.json"));
+    assert_eq!(
+        path,
+        home.path().join("sessions").join("active").join("101.json")
+    );
     assert_eq!(value["pid"].as_u64(), Some(101));
     assert_eq!(value["thread_id"], id.to_string());
 }
@@ -51,6 +54,21 @@ fn session_lookup_disambiguates_parallel_processes() {
 
     assert_ne!(first, second);
     assert_eq!(read_lookup(&first)["thread_id"], first_id.to_string());
+    assert_eq!(read_lookup(&second)["thread_id"], second_id.to_string());
+}
+
+#[test]
+fn session_lookup_updates_only_the_current_process_pointer() {
+    let home = TempDir::new().expect("temp home");
+    let first_id = thread_id("00000000-0000-0000-0000-000000000506");
+    let second_id = thread_id("00000000-0000-0000-0000-000000000507");
+
+    let first = publish_session_lookup_for_process(home.path(), 301, first_id)
+        .expect("publish first session");
+    let second = publish_session_lookup_for_process(home.path(), 301, second_id)
+        .expect("publish replacement session");
+
+    assert_eq!(first, second);
     assert_eq!(read_lookup(&second)["thread_id"], second_id.to_string());
 }
 
