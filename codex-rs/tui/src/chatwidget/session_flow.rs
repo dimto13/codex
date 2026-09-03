@@ -1,6 +1,40 @@
 //! Session configuration and thread-header orchestration for `ChatWidget`.
 
+use std::io::Write;
+use std::path::Path;
+use std::path::PathBuf;
+
 use super::*;
+
+fn session_id_message(thread_id: ThreadId) -> String {
+    format!("Session ID: {thread_id}")
+}
+
+fn publish_session_lookup(codex_home: &Path, thread_id: ThreadId) -> std::io::Result<PathBuf> {
+    publish_session_lookup_for_process(codex_home, std::process::id(), thread_id)
+}
+
+fn publish_session_lookup_for_process(
+    codex_home: &Path,
+    process_id: u32,
+    thread_id: ThreadId,
+) -> std::io::Result<PathBuf> {
+    let directory = codex_home.join("session-processes");
+    std::fs::create_dir_all(&directory)?;
+    let path = directory.join(format!("{process_id}.json"));
+    let payload = serde_json::to_vec_pretty(&serde_json::json!({
+        "pid": process_id,
+        "thread_id": thread_id.to_string(),
+    }))
+    .map_err(std::io::Error::other)?;
+
+    let mut temporary = tempfile::NamedTempFile::new_in(&directory)?;
+    temporary.write_all(&payload)?;
+    temporary.write_all(b"\n")?;
+    temporary.as_file().sync_all()?;
+    temporary.persist(&path).map_err(|err| err.error)?;
+    Ok(path)
+}
 
 impl ChatWidget {
     fn on_session_configured_with_display_and_fork_parent_title(
@@ -151,6 +185,10 @@ impl ChatWidget {
     }
 
     pub(crate) fn handle_thread_session(&mut self, session: ThreadSessionState) {
+        let thread_id = session.thread_id;
+        if let Err(err) = publish_session_lookup(&self.config.codex_home, thread_id) {
+            tracing::warn!(%thread_id, %err, "failed to publish session lookup");
+        }
         self.instruction_source_paths = session.instruction_source_paths.clone();
         let fork_parent_title = session.fork_parent_title.clone();
         self.on_session_configured_with_display_and_fork_parent_title(
@@ -158,6 +196,7 @@ impl ChatWidget {
             SessionConfiguredDisplay::Normal,
             fork_parent_title,
         );
+        self.add_info_message(session_id_message(thread_id), /*hint*/ None);
     }
 
     pub(crate) fn handle_thread_session_quiet(&mut self, session: ThreadSessionState) {
@@ -231,3 +270,7 @@ impl ChatWidget {
         self.bottom_pane.set_skills(skills);
     }
 }
+
+#[cfg(test)]
+#[path = "session_flow_tests.rs"]
+mod tests;
