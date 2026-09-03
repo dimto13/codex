@@ -1,9 +1,10 @@
 //! Session configuration and thread-header orchestration for `ChatWidget`.
 
-use super::*;
 use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
+
+use super::*;
 
 fn session_id_message(thread_id: ThreadId) -> String {
     format!("Session ID: {thread_id}")
