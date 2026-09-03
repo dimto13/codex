@@ -20,10 +20,7 @@ fn session_lookup_publishes_new_session_immediately() {
     let path = publish_session_lookup_for_process(home.path(), 101, id).expect("publish lookup");
     let value = read_lookup(&path);
 
-    assert_eq!(
-        path,
-        home.path().join("session-processes").join("101.json"),
-    );
+    assert_eq!(path, home.path().join("session-processes").join("101.json"),);
     assert_eq!(value["pid"].as_u64(), Some(101));
     assert_eq!(value["thread_id"], id.to_string());
 }
