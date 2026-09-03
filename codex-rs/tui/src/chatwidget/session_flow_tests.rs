@@ -62,8 +62,5 @@ fn session_lookup_disambiguates_parallel_processes() {
 fn session_id_message_snapshot() {
     let id = thread_id("00000000-0000-0000-0000-000000000505");
 
-    insta::assert_snapshot!(
-        session_id_message(id),
-        @"Session ID: 00000000-0000-0000-0000-000000000505",
-    );
+    insta::assert_snapshot!(session_id_message(id), @"Session ID: 00000000-0000-0000-0000-000000000505");
 }
