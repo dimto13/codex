@@ -63,6 +63,6 @@ fn session_id_message_snapshot() {
 
     insta::assert_snapshot!(
         session_id_message(id),
-        @"Session ID: 00000000-0000-0000-0000-000000000505"
+        @"Session ID: 00000000-0000-0000-0000-000000000505",
     );
 }
