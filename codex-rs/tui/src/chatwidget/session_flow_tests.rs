@@ -1,7 +1,8 @@
-use super::*;
 use codex_protocol::ThreadId;
 use pretty_assertions::assert_eq;
 use tempfile::TempDir;
+
+use super::*;
 
 fn thread_id(value: &str) -> ThreadId {
     ThreadId::from_string(value).expect("valid thread id")
