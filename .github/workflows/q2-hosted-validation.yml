@@ -1,0 +1,35 @@
+name: q2-hosted-validation
+
+on:
+  push:
+    branches:
+      - plan/q2-hosted-validation
+
+permissions:
+  contents: read
+
+jobs:
+  validate-q2-exact-head:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout Q2 exact head
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: f3c3ed6760c43f5d5074de8a60fd0683aded2f79
+          persist-credentials: false
+      - uses: ./.github/actions/setup-ci
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+        with:
+          components: rustfmt, clippy
+      - name: Run codex-tui tests
+        working-directory: codex-rs
+        run: just test -p codex-tui
+      - name: Run scoped fixes
+        working-directory: codex-rs
+        run: just fix -p codex-tui
+      - name: Run formatter
+        working-directory: codex-rs
+        run: just fmt
+      - name: Verify exact-head sources remain clean
+        run: git diff --exit-code
