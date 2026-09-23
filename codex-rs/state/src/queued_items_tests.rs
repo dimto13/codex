@@ -32,7 +32,7 @@ async fn queue_is_ordered_and_thread_scoped() {
             .queued_user_submissions(first_thread)
             .await
             .expect("list queue"),
-        vec![first.clone(), second]
+        vec![first.clone(), second.clone()]
     );
     assert!(
         runtime
@@ -45,11 +45,7 @@ async fn queue_is_ordered_and_thread_scoped() {
             .queued_user_submissions(first_thread)
             .await
             .expect("list queue after delete"),
-        vec![runtime
-            .queued_user_submissions(first_thread)
-            .await
-            .expect("list remaining queue")[0]
-            .clone()]
+        vec![second]
     );
 
     runtime.close().await;
