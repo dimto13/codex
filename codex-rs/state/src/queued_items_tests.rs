@@ -5,14 +5,18 @@ fn temp_home() -> std::path::PathBuf {
     std::env::temp_dir().join(format!("codex-queue-test-{}", Uuid::now_v7()))
 }
 
+fn thread_id() -> ThreadId {
+    ThreadId::try_from(Uuid::now_v7().to_string()).expect("valid thread id")
+}
+
 #[tokio::test]
 async fn queue_is_ordered_and_thread_scoped() {
     let home = temp_home();
     let runtime = StateRuntime::init(home.clone(), "test-provider".to_string())
         .await
         .expect("initialize state runtime");
-    let first_thread = ThreadId::new();
-    let second_thread = ThreadId::new();
+    let first_thread = thread_id();
+    let second_thread = thread_id();
 
     let first = runtime
         .enqueue_user_submission(first_thread, r#"{"text":"one"}"#)
