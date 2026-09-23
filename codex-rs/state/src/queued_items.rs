@@ -107,3 +107,7 @@ impl StateRuntime {
         Ok(deleted)
     }
 }
+
+#[cfg(test)]
+#[path = "queued_items_tests.rs"]
+mod tests;
