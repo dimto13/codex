@@ -15,6 +15,7 @@ pub mod log_db;
 mod migrations;
 mod model;
 mod paths;
+mod queued_items;
 mod runtime;
 mod telemetry;
 
@@ -22,6 +23,7 @@ pub use model::LogEntry;
 pub use model::LogQuery;
 pub use model::LogRow;
 pub use model::Phase2JobClaimOutcome;
+pub use queued_items::QueuedUserSubmissionRecord;
 /// Preferred entrypoint: owns configuration and metrics.
 pub use runtime::StateRuntime;
 
