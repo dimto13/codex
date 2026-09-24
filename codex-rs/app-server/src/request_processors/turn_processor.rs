@@ -80,6 +80,7 @@ pub(crate) struct TurnRequestProcessor {
     thread_watch_manager: ThreadWatchManager,
     thread_list_state_permit: Arc<Semaphore>,
     skills_watcher: Arc<SkillsWatcher>,
+    state_db: Option<StateDbHandle>,
 }
 
 fn map_additional_context(
@@ -136,6 +137,7 @@ impl TurnRequestProcessor {
         thread_watch_manager: ThreadWatchManager,
         thread_list_state_permit: Arc<Semaphore>,
         skills_watcher: Arc<SkillsWatcher>,
+        state_db: Option<StateDbHandle>,
     ) -> Self {
         Self {
             auth_manager,
@@ -150,6 +152,7 @@ impl TurnRequestProcessor {
             thread_watch_manager,
             thread_list_state_permit,
             skills_watcher,
+            state_db,
         }
     }
 
@@ -171,6 +174,142 @@ impl TurnRequestProcessor {
         )
         .await
         .map(|response| Some(response.into()))
+    }
+
+    pub(crate) async fn thread_queue(
+        &self,
+        params: ThreadQueueParams,
+    ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
+        let thread_id = ThreadId::from_string(&params.thread_id)
+            .map_err(|err| invalid_request(format!("invalid thread id: {err}")))?;
+        let thread = self
+            .thread_manager
+            .get_thread(thread_id)
+            .await
+            .map_err(|_| invalid_request(format!("thread not found: {thread_id}")))?;
+        let state_db = self
+            .state_db
+            .clone()
+            .ok_or_else(|| internal_error("thread queue requires state database".to_string()))?;
+        let payload = serde_json::json!({
+            "message": params.message,
+            "clientUserMessageId": params.client_user_message_id,
+        });
+        let record = state_db
+            .enqueue_user_submission(thread_id, &payload.to_string())
+            .await
+            .map_err(|err| internal_error(format!("failed to persist queued turn: {err}")))?;
+        let queue_id = record.id.clone();
+        let message = payload["message"].as_str().unwrap_or_default().to_string();
+        let client_user_message_id = payload["clientUserMessageId"].as_str().map(str::to_string);
+        tokio::spawn(async move {
+            loop {
+                let Ok(queued) = state_db.queued_user_submissions(thread_id).await else {
+                    return;
+                };
+                if queued.first().map(|item| item.id.as_str()) != Some(queue_id.as_str()) {
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    continue;
+                }
+                if matches!(
+                    thread.agent_status().await,
+                    codex_protocol::protocol::AgentStatus::Running
+                ) {
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    continue;
+                }
+                let op = Op::UserInput {
+                    items: vec![CoreInputItem::Text {
+                        text: message.clone(),
+                        text_elements: Vec::new(),
+                    }],
+                    final_output_json_schema: None,
+                    responsesapi_client_metadata: None,
+                    additional_context: BTreeMap::new(),
+                    thread_settings: Default::default(),
+                };
+                if thread
+                    .submit_user_input_with_client_user_message_id(
+                        op,
+                        /*trace*/ None,
+                        client_user_message_id.clone(),
+                    )
+                    .await
+                    .is_ok()
+                {
+                    let _ = state_db
+                        .delete_queued_user_submission(thread_id, &queue_id)
+                        .await;
+                }
+                return;
+            }
+        });
+        Ok(Some(
+            ThreadQueueResponse {
+                thread_id: thread_id.to_string(),
+                queue_id: record.id,
+            }
+            .into(),
+        ))
+    }
+
+    pub(crate) async fn thread_status_get(
+        &self,
+        params: ThreadStatusGetParams,
+    ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
+        let thread_id = match ThreadId::from_string(&params.thread_id) {
+            Ok(thread_id) => thread_id,
+            Err(_) => {
+                return Ok(Some(
+                    ThreadStatusGetResponse {
+                        thread_id: params.thread_id,
+                        state: ThreadRuntimeState::NotFound,
+                        active_turn: false,
+                        queued: 0,
+                    }
+                    .into(),
+                ));
+            }
+        };
+        let Ok(thread) = self.thread_manager.get_thread(thread_id).await else {
+            return Ok(Some(
+                ThreadStatusGetResponse {
+                    thread_id: thread_id.to_string(),
+                    state: ThreadRuntimeState::NotFound,
+                    active_turn: false,
+                    queued: 0,
+                }
+                .into(),
+            ));
+        };
+        let active_turn = matches!(
+            thread.agent_status().await,
+            codex_protocol::protocol::AgentStatus::Running
+        );
+        let queued = match self.state_db.as_ref() {
+            Some(state_db) => state_db
+                .queued_user_submissions(thread_id)
+                .await
+                .map_err(|err| internal_error(format!("failed to read queued turns: {err}")))?
+                .len() as u32,
+            None => 0,
+        };
+        let state = if active_turn {
+            ThreadRuntimeState::Running
+        } else if queued > 0 {
+            ThreadRuntimeState::Queued
+        } else {
+            ThreadRuntimeState::Idle
+        };
+        Ok(Some(
+            ThreadStatusGetResponse {
+                thread_id: thread_id.to_string(),
+                state,
+                active_turn,
+                queued,
+            }
+            .into(),
+        ))
     }
 
     pub(crate) async fn thread_inject_items(

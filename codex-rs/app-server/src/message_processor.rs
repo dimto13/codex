@@ -441,6 +441,7 @@ impl MessageProcessor {
             thread_watch_manager,
             thread_list_state_permit,
             Arc::clone(&skills_watcher),
+            state_db.clone(),
         );
         if matches!(plugin_startup_tasks, crate::PluginStartupTasks::Start) {
             // Keep plugin startup warmups aligned at app-server startup.
@@ -1260,6 +1261,12 @@ impl MessageProcessor {
                         supports_openai_form_elicitation,
                     )
                     .await
+            }
+            ClientRequest::ThreadQueue { params, .. } => {
+                self.turn_processor.thread_queue(params).await
+            }
+            ClientRequest::ThreadStatusGet { params, .. } => {
+                self.turn_processor.thread_status_get(params).await
             }
             ClientRequest::ThreadInjectItems { params, .. } => {
                 self.turn_processor.thread_inject_items(params).await
