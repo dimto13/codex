@@ -15,11 +15,11 @@ jobs:
         run: |
           set -euo pipefail
           echo '=== turn request processor ==='
-          rg -n "turn_start|TurnStart|submit_user_input_with_client_user_message_id|thread_manager|get_thread" codex-rs/app-server/src/request_processors/turn.rs codex-rs/app-server/src/request_processors 2>/dev/null | head -n 240 || true
+          grep -RniE "turn_start|TurnStart|submit_user_input_with_client_user_message_id|thread_manager|get_thread" codex-rs/app-server/src/request_processors 2>/dev/null | head -n 240 || true
           echo '=== v2 protocol ==='
-          rg -n "TurnStart|Thread.*Status|ClientRequest|thread/|turn/" codex-rs/app-server-protocol/src/protocol/{common,v2}.rs | head -n 260 || true
+          grep -nE "TurnStart|Thread.*Status|ClientRequest|thread/|turn/" codex-rs/app-server-protocol/src/protocol/common.rs codex-rs/app-server-protocol/src/protocol/v2.rs | head -n 300 || true
           echo '=== state handle/runtime ==='
-          rg -n "StateDbHandle|StateRuntime|enqueue_user_submission|queued_user_submissions|delete_queued" codex-rs/app-server codex-rs/core codex-rs/state | head -n 260 || true
+          grep -RniE "StateDbHandle|StateRuntime|enqueue_user_submission|queued_user_submissions|delete_queued" codex-rs/app-server codex-rs/core codex-rs/state | head -n 300 || true
           echo '=== thread manager lookup ==='
-          rg -n "get_thread|thread_id|resume_thread|loaded" codex-rs/core/src/thread_manager.rs | head -n 240 || true
+          grep -nE "get_thread|thread_id|resume_thread|loaded" codex-rs/core/src/thread_manager.rs | head -n 260 || true
           exit 1
