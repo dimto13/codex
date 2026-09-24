@@ -96,6 +96,19 @@ jobs:
           if 'ThreadQueue => "thread/queue"' not in s:
               s=s.replace(marker,block,1); p.write_text(s)
 
+          # expose new protocol types to request processor modules
+          p=Path('codex-rs/app-server/src/request_processors.rs'); s=p.read_text()
+          import_marker='use codex_app_server_protocol::ThreadReadParams;\n'
+          imports='''use codex_app_server_protocol::ThreadQueueParams;
+          use codex_app_server_protocol::ThreadQueueResponse;
+          use codex_app_server_protocol::ThreadRuntimeState;
+          use codex_app_server_protocol::ThreadStatusGetParams;
+          use codex_app_server_protocol::ThreadStatusGetResponse;
+          '''+import_marker
+          if 'use codex_app_server_protocol::ThreadQueueParams;' not in s:
+              if import_marker not in s: raise SystemExit('request processor import marker missing')
+              s=s.replace(import_marker,imports,1); p.write_text(s)
+
           # TurnRequestProcessor state db field and ctor
           p=Path('codex-rs/app-server/src/request_processors/turn_processor.rs'); s=p.read_text()
           if 'state_db: Option<StateDbHandle>,' not in s.split('struct ThreadSettingsBuildParams')[0]:
@@ -274,6 +287,6 @@ jobs:
           git status --short
           git config user.name dimto13
           git config user.email '93082815+dimto13@users.noreply.github.com'
-          git add codex-rs/app-server-protocol/src/protocol/common.rs codex-rs/app-server-protocol/src/protocol/v2/thread.rs codex-rs/app-server/src/message_processor.rs codex-rs/app-server/src/request_processors/turn_processor.rs
+          git add codex-rs/app-server-protocol/src/protocol/common.rs codex-rs/app-server-protocol/src/protocol/v2/thread.rs codex-rs/app-server/src/request_processors.rs codex-rs/app-server/src/message_processor.rs codex-rs/app-server/src/request_processors/turn_processor.rs
           git commit -m 'feat(#28): add durable queue and runtime status API [q3b-generated]'
           git push origin HEAD:feature/queue-existing-session-runtime
