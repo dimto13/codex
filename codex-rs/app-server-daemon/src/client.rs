@@ -12,9 +12,15 @@ use codex_app_server_protocol::JSONRPCMessage;
 use codex_app_server_protocol::JSONRPCNotification;
 use codex_app_server_protocol::JSONRPCRequest;
 use codex_app_server_protocol::RequestId;
+use codex_app_server_protocol::ThreadQueueParams;
+use codex_app_server_protocol::ThreadQueueResponse;
+use codex_app_server_protocol::ThreadStatusGetParams;
+use codex_app_server_protocol::ThreadStatusGetResponse;
 use codex_uds::UnixStream;
 use futures::SinkExt;
 use futures::StreamExt;
+use serde::de::DeserializeOwned;
+use serde::Serialize;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncWrite;
 use tokio::time::timeout;
@@ -25,6 +31,7 @@ use tokio_tungstenite::tungstenite::Message;
 pub(crate) const CONTROL_SOCKET_RESPONSE_TIMEOUT: Duration = Duration::from_secs(2);
 const CLIENT_NAME: &str = "codex_app_server_daemon";
 const INITIALIZE_REQUEST_ID: RequestId = RequestId::Integer(1);
+const CONTROL_REQUEST_ID: RequestId = RequestId::Integer(2);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ProbeInfo {
@@ -42,22 +49,101 @@ pub(crate) async fn probe(socket_path: &Path) -> Result<ProbeInfo> {
         })?
 }
 
+pub(crate) async fn queue_thread(
+    socket_path: &Path,
+    params: ThreadQueueParams,
+) -> Result<ThreadQueueResponse> {
+    request(socket_path, "thread/queue", params).await
+}
+
+pub(crate) async fn thread_status(
+    socket_path: &Path,
+    params: ThreadStatusGetParams,
+) -> Result<ThreadStatusGetResponse> {
+    request(socket_path, "thread/status/get", params).await
+}
+
+async fn request<P, R>(socket_path: &Path, method: &str, params: P) -> Result<R>
+where
+    P: Serialize,
+    R: DeserializeOwned,
+{
+    timeout(
+        CONTROL_SOCKET_RESPONSE_TIMEOUT,
+        request_inner(socket_path, method, params),
+    )
+    .await
+    .with_context(|| {
+        format!(
+            "timed out waiting for `{method}` response from {}",
+            socket_path.display()
+        )
+    })?
+}
+
+async fn request_inner<P, R>(socket_path: &Path, method: &str, params: P) -> Result<R>
+where
+    P: Serialize,
+    R: DeserializeOwned,
+{
+    let mut websocket = connect(socket_path).await?;
+    initialize(&mut websocket, /*experimental_api*/ false).await?;
+    send_initialized(&mut websocket).await?;
+
+    let request = JSONRPCMessage::Request(JSONRPCRequest {
+        id: CONTROL_REQUEST_ID,
+        method: method.to_string(),
+        params: Some(serde_json::to_value(params)?),
+        trace: None,
+    });
+    send_message(&mut websocket, &request)
+        .await
+        .with_context(|| format!("failed to send `{method}` request"))?;
+
+    loop {
+        let message = read_message(&mut websocket).await?;
+        match message {
+            JSONRPCMessage::Response(response) if response.id == CONTROL_REQUEST_ID => {
+                websocket.close(None).await.ok();
+                return serde_json::from_value(response.result)
+                    .with_context(|| format!("failed to parse `{method}` response"));
+            }
+            JSONRPCMessage::Error(error) if error.id == CONTROL_REQUEST_ID => {
+                websocket.close(None).await.ok();
+                return Err(anyhow!(
+                    "`{method}` failed with JSON-RPC error {}: {}",
+                    error.error.code,
+                    error.error.message
+                ));
+            }
+            _ => {}
+        }
+    }
+}
+
 async fn probe_inner(socket_path: &Path) -> Result<ProbeInfo> {
     let mut websocket = connect(socket_path).await?;
 
     let initialize_response = initialize(&mut websocket, /*experimental_api*/ false).await?;
-    let initialized = JSONRPCMessage::Notification(JSONRPCNotification {
-        method: "initialized".to_string(),
-        params: None,
-    });
-    send_message(&mut websocket, &initialized)
-        .await
-        .context("failed to send initialized notification")?;
+    send_initialized(&mut websocket).await?;
     websocket.close(None).await.ok();
 
     Ok(ProbeInfo {
         app_server_version: parse_version_from_user_agent(&initialize_response.user_agent)?,
     })
+}
+
+async fn send_initialized<S>(websocket: &mut WebSocketStream<S>) -> Result<()>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let initialized = JSONRPCMessage::Notification(JSONRPCNotification {
+        method: "initialized".to_string(),
+        params: None,
+    });
+    send_message(websocket, &initialized)
+        .await
+        .context("failed to send initialized notification")
 }
 
 pub(crate) async fn connect(socket_path: &Path) -> Result<WebSocketStream<UnixStream>> {
