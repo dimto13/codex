@@ -66,3 +66,60 @@ jobs:
       - name: Check for a clean worktree
         if: always() && !cancelled()
         uses: ./.github/actions/check-clean-worktree
+
+  scoped-tests:
+    # The other blocking jobs prove the workspace compiles, is formatted and has
+    # clean dependencies, but none of them runs a test. The autonomous worker
+    # writes tests it cannot execute locally, so without this job a fully green
+    # lane says nothing about whether those tests pass. Scope stays on the
+    # packages the change actually touches to keep the loop fast.
+    name: Scoped package tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve changed packages
+        id: packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            base='${{ github.event.pull_request.base.sha }}'
+            head='${{ github.event.pull_request.head.sha }}'
+          else
+            base='${{ github.event.before }}'
+            head='${{ github.sha }}'
+          fi
+          if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            # First push of a branch, or a force-push that dropped the old base:
+            # fall back to the merge base with the default branch.
+            base="$(git merge-base "origin/${{ github.event.repository.default_branch }}" "${head}")"
+          fi
+          git diff --name-only --no-renames "${base}" "${head}" > changed.txt
+          packages="$(python3 .github/scripts/changed_rust_packages.py < changed.txt | sed 's/^/-p /' | tr '\n' ' ')"
+          echo "Changed packages: ${packages:-<none>}"
+          echo "packages=${packages}" >> "$GITHUB_OUTPUT"
+
+      - uses: ./.github/actions/setup-ci
+        if: steps.packages.outputs.packages != ''
+
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+        if: steps.packages.outputs.packages != ''
+
+      - uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532 # v2.62.49
+        if: steps.packages.outputs.packages != ''
+        with:
+          tool: cargo-nextest
+
+      - name: Run tests for changed packages
+        if: steps.packages.outputs.packages != ''
+        working-directory: codex-rs
+        run: just test ${{ steps.packages.outputs.packages }}
+
+      - name: Check for a clean worktree
+        if: always() && !cancelled()
+        uses: ./.github/actions/check-clean-worktree

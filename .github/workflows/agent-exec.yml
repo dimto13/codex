@@ -1,0 +1,256 @@
+name: agent-exec
+
+# Execution bridge for the autonomous worker sessions described in
+# `ops/control-plane.md`.
+#
+# The worker reaches this repository only through the GitHub API: it can read
+# files and write comments, but it has no shell, no checkout and no Rust
+# toolchain. Without this workflow every code change has to be pushed blind,
+# unformatted and untested. With it, the worker posts an `/agent-exec` comment
+# on the issue labelled `agent:exec`, and a runner applies the edit, formats it,
+# runs the repo-mandated checks and pushes the result back — then reports the
+# real compiler and test output as a comment.
+#
+# The payload is declarative — a unified diff, or a list of anchored edit
+# operations — and is never executed. The only code this job runs is the
+# repository's own toolchain, exactly as the blocking lane runs it.
+#
+# Trigger is `issue_comment`, so this file always executes from the default
+# branch and can never be redefined by the branch under work.
+
+on:
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      comment_id:
+        description: Issue comment ID carrying the /agent-exec payload.
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  # One exec at a time per repository: the worker is serial by design, and
+  # concurrent pushes to the same work branch would race.
+  group: agent-exec
+  cancel-in-progress: false
+
+jobs:
+  exec:
+    name: Apply, check and push
+    # Only a comment from the repository owner on the dedicated exec issue runs
+    # code. This job executes worker-authored scripts with a write token, so the
+    # gate is deliberately narrow.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.issue.pull_request == null &&
+       github.event.comment.author_association == 'OWNER' &&
+       contains(github.event.issue.labels.*.name, 'agent:exec') &&
+       startsWith(github.event.comment.body, '/agent-exec'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Acknowledge the request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMENT_ID: ${{ github.event.comment.id || inputs.comment_id }}
+        run: |
+          gh api --method POST \
+            "repos/${{ github.repository }}/issues/comments/${COMMENT_ID}/reactions" \
+            -f content=eyes >/dev/null || true
+
+      - name: Check out trusted tooling from the default branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: _exec
+          persist-credentials: false
+
+      - name: Parse the request
+        id: parse
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMENT_ID: ${{ github.event.comment.id || inputs.comment_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/agent-exec"
+          gh api "repos/${{ github.repository }}/issues/comments/${COMMENT_ID}" \
+            --jq .body > "${RUNNER_TEMP}/agent-exec/comment.md"
+          python3 _exec/.github/scripts/agent_exec_payload.py \
+            "${RUNNER_TEMP}/agent-exec/comment.md" "${RUNNER_TEMP}/agent-exec"
+          request="${RUNNER_TEMP}/agent-exec/request.json"
+          {
+            echo "branch=$(jq -r .branch "$request")"
+            echo "base=$(jq -r .base "$request")"
+            echo "message=$(jq -r .message "$request")"
+            echo "mode=$(jq -r .mode "$request")"
+            echo "push=$(jq -r .push "$request")"
+            echo "checks=$(jq -r '.checks | join(" ")' "$request")"
+            echo "packages=$(jq -r '[.packages[] | "-p", .] | join(" ")' "$request")"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Check out the work branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ steps.parse.outputs.base }}
+          fetch-depth: 0
+          path: repo
+          # A PAT makes pushes trigger `pull_request` CI on the resulting head.
+          # Without it the push still lands, but the PR keeps its stale checks
+          # until the next event, so the worker must not treat them as fresh.
+          token: ${{ secrets.AREN_AGENT_PAT || github.token }}
+
+      - name: Position the work branch
+        working-directory: repo
+        env:
+          BRANCH: ${{ steps.parse.outputs.branch }}
+        run: |
+          set -euo pipefail
+          git config user.name "aren-agent-exec[bot]"
+          git config user.email "aren-agent-exec@users.noreply.github.com"
+          if git ls-remote --exit-code --heads origin "refs/heads/${BRANCH}" >/dev/null 2>&1; then
+            git fetch origin "${BRANCH}"
+            git checkout -B "${BRANCH}" "origin/${BRANCH}"
+          else
+            git checkout -B "${BRANCH}"
+          fi
+          echo "Work branch ${BRANCH} at $(git rev-parse HEAD)"
+
+      - name: Apply the payload
+        working-directory: repo
+        env:
+          MODE: ${{ steps.parse.outputs.mode }}
+        # The payload is declarative and is never executed. `diff` goes through
+        # git; `edits` goes through a trusted applier checked out from the
+        # default branch, which fails closed on a stale anchor.
+        run: |
+          set -euo pipefail
+          if [[ "${MODE}" == "diff" ]]; then
+            git apply --3way --whitespace=nowarn "${RUNNER_TEMP}/agent-exec/payload.diff"
+          else
+            python3 "${GITHUB_WORKSPACE}/_exec/.github/scripts/agent_exec_apply.py" \
+              "${RUNNER_TEMP}/agent-exec/payload.json" --root .
+          fi
+          echo "--- worktree after payload ---"
+          git status --porcelain=v1
+
+      - name: Fail when the payload changed nothing
+        working-directory: repo
+        run: |
+          set -euo pipefail
+          if [[ -z "$(git status --porcelain=v1)" ]]; then
+            echo "::error::payload left the worktree unchanged; nothing to commit"
+            exit 1
+          fi
+
+      - name: Refuse edits to protected policy surfaces
+        working-directory: repo
+        run: |
+          set -euo pipefail
+          # These are owner gates in `ops/control-plane.md`. The worker may not
+          # relax them to make its own run go green.
+          protected='^(codex-rs/deny\.toml|\.github/workflows/(agent-exec|blocking-ci|cargo-deny|blob-size-policy)\.yml)$'
+          offending="$(git status --porcelain=v1 | awk '{print $NF}' | grep -E "${protected}" || true)"
+          if [[ -n "${offending}" ]]; then
+            echo "::error::payload touches owner-gated policy files:"
+            printf '%s\n' "${offending}"
+            exit 1
+          fi
+
+      - uses: ./repo/.github/actions/setup-ci
+
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+        with:
+          components: rustfmt, clippy
+
+      - name: Install cargo-nextest
+        if: contains(steps.parse.outputs.checks, 'test')
+        uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532 # v2.62.49
+        with:
+          tool: cargo-nextest
+
+      - name: Format
+        if: contains(steps.parse.outputs.checks, 'fmt')
+        working-directory: repo/codex-rs
+        # Mirrors the exact invocation the blocking `format` job checks, so a
+        # green agent-exec means a green blocking job.
+        run: cargo fmt -- --config imports_granularity=Item
+
+      - name: Clippy
+        if: contains(steps.parse.outputs.checks, 'clippy')
+        working-directory: repo/codex-rs
+        run: cargo clippy --tests ${{ steps.parse.outputs.packages }} -- -D warnings
+
+      - name: Test
+        if: contains(steps.parse.outputs.checks, 'test')
+        working-directory: repo/codex-rs
+        run: just test ${{ steps.parse.outputs.packages }}
+
+      - name: Benchmark smoke test
+        if: contains(steps.parse.outputs.checks, 'bench-smoke')
+        working-directory: repo/codex-rs
+        run: just bench-smoke
+
+      - name: Refresh the Bazel lockfile
+        if: contains(steps.parse.outputs.checks, 'bazel-lock')
+        working-directory: repo
+        run: just bazel-lock-update
+
+      - name: Commit and push
+        id: push
+        if: steps.parse.outputs.push == 'true'
+        working-directory: repo
+        env:
+          BRANCH: ${{ steps.parse.outputs.branch }}
+          MESSAGE: ${{ steps.parse.outputs.message }}
+        run: |
+          set -euo pipefail
+          git add -A
+          git commit -m "${MESSAGE}"
+          for attempt in 1 2 3 4; do
+            if git push -u origin "${BRANCH}"; then
+              break
+            fi
+            if [[ "${attempt}" == 4 ]]; then
+              echo "::error::push failed after 4 attempts"
+              exit 1
+            fi
+            sleep "$((2 ** attempt))"
+          done
+          echo "head=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Report the outcome
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ github.event.issue.number }}
+          RESULT: ${{ job.status }}
+          BRANCH: ${{ steps.parse.outputs.branch }}
+          HEAD: ${{ steps.push.outputs.head }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${ISSUE}" ]]; then
+            echo "no issue to report to"; exit 0
+          fi
+          {
+            echo "## agent-exec — \`${RESULT}\`"
+            echo
+            echo "- branch: \`${BRANCH:-unknown}\`"
+            echo "- new head: \`${HEAD:-none}\`"
+            echo "- logs: ${RUN_URL}"
+            echo
+            if [[ "${RESULT}" != "success" ]]; then
+              echo "The payload was **not** pushed. Read the job logs above, fix the"
+              echo "root cause and post a corrected \`/agent-exec\` comment. Do not"
+              echo "retry the identical payload."
+            fi
+            echo
+            echo "---"
+            echo "_Generated by [Claude Code](https://claude.ai/code)_"
+          } > comment.md
+          gh api --method POST "repos/${{ github.repository }}/issues/${ISSUE}/comments" \
+            -F body=@comment.md >/dev/null
