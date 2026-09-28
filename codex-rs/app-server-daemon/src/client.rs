@@ -243,6 +243,22 @@ fn parse_version_from_user_agent(user_agent: &str) -> Result<String> {
     Ok(version.to_string())
 }
 
+/// Public entry point for the CLI queue subcommand.
+pub async fn cli_queue_thread(
+    socket_path: &Path,
+    params: ThreadQueueParams,
+) -> Result<ThreadQueueResponse> {
+    queue_thread(socket_path, params).await
+}
+
+/// Public entry point for the CLI queue status subcommand.
+pub async fn cli_thread_status(
+    socket_path: &Path,
+    params: ThreadStatusGetParams,
+) -> Result<ThreadStatusGetResponse> {
+    thread_status(socket_path, params).await
+}
+
 #[cfg(all(test, unix))]
 mod tests {
     use pretty_assertions::assert_eq;
