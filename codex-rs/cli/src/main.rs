@@ -61,6 +61,7 @@ mod interactive_search;
 mod marketplace_cmd;
 mod mcp_cmd;
 mod plugin_cmd;
+mod queue_cmd;
 mod remote_control_cmd;
 #[cfg(target_os = "windows")]
 mod sandbox_setup;
@@ -221,6 +222,8 @@ enum Subcommand {
 
     /// Inspect feature flags.
     Features(FeaturesCli),
+    /// Queue a message into an existing session.
+    Queue(queue_cmd::QueueCommand),
 }
 
 #[derive(Debug, Parser)]
@@ -1333,6 +1336,14 @@ async fn cli_main(
                 }
             }
         }
+        Some(Subcommand::Queue(queue_cli)) => {
+            reject_remote_mode_for_subcommand(
+                root_remote.as_deref(),
+                root_remote_auth_token_env.as_deref(),
+                "queue",
+            )?;
+            queue_cmd::run(queue_cli).await?;
+        }
         Some(Subcommand::RemoteControl(remote_control_cli)) => {
             let subcommand_name = remote_control_cli.subcommand_name();
             reject_remote_mode_for_subcommand(
@@ -2239,6 +2250,7 @@ fn unsupported_subcommand_name_for_strict_config(
         Some(Subcommand::AppServer(app_server)) => {
             Some(app_server_subcommand_name(app_server.subcommand.as_ref()))
         }
+        Some(Subcommand::Queue(_)) => Some("queue"),
         Some(Subcommand::RemoteControl(remote_control)) => Some(remote_control.subcommand_name()),
         Some(Subcommand::Mcp(_)) => Some("mcp"),
         Some(Subcommand::Plugin(_)) => Some("plugin"),
