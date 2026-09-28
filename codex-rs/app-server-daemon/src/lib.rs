@@ -1,5 +1,7 @@
 mod backend;
 mod client;
+pub use client::cli_queue_thread;
+pub use client::cli_thread_status;
 mod managed_install;
 mod remote_control_client;
 mod settings;
