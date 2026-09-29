@@ -3,6 +3,7 @@ use anyhow::Result;
 use serde::Deserialize;
 use serde::Serialize;
 use std::fs;
+use std::future::Future;
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -121,11 +122,14 @@ impl SchedulerStore {
     }
 
     pub(crate) fn recoverable_due_task_ids(&self, now_utc_ms: u64) -> Vec<String> {
-        self.tasks
+        let mut ids: Vec<String> = self
+            .tasks
             .iter()
             .filter(|task| task.state == TaskState::Pending && task.due_at_utc_ms <= now_utc_ms)
             .map(|task| task.id.clone())
-            .collect()
+            .collect();
+        ids.sort();
+        ids
     }
 
     pub(crate) fn claim(&mut self, id: &str) -> Result<Option<ScheduledTask>> {
@@ -149,6 +153,27 @@ impl SchedulerStore {
 
     pub(crate) fn fail(&mut self, id: &str, error: String) -> Result<Option<ScheduledTask>> {
         self.finish(id, TaskState::Failed, Some(error))
+    }
+
+    pub(crate) async fn dispatch_due<F, Fut>(&mut self, now: u64, mut dispatch: F) -> Result<()>
+    where
+        F: FnMut(ScheduledTask) -> Fut,
+        Fut: Future<Output = Result<()>>,
+    {
+        for id in self.recoverable_due_task_ids(now) {
+            let Some(task) = self.claim(&id)? else {
+                continue;
+            };
+            match dispatch(task).await {
+                Ok(()) => {
+                    self.succeed(&id)?;
+                }
+                Err(error) => {
+                    self.fail(&id, error.to_string())?;
+                }
+            }
+        }
+        Ok(())
     }
 
     fn finish(
