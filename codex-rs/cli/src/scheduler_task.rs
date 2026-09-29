@@ -55,8 +55,10 @@ impl SchedulerStore {
     pub(crate) fn load(codex_home: &Path) -> Result<Self> {
         let path = codex_home.join("scheduled_tasks.json");
         let mut tasks: Vec<ScheduledTask> = if path.exists() {
-            serde_json::from_slice(&fs::read(&path).with_context(|| format!("read {}", path.display()))?)
-                .with_context(|| format!("parse {}", path.display()))?
+            serde_json::from_slice(
+                &fs::read(&path).with_context(|| format!("read {}", path.display()))?,
+            )
+            .with_context(|| format!("parse {}", path.display()))?
         } else {
             Vec::new()
         };
