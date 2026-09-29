@@ -11,7 +11,10 @@ use tempfile::TempDir;
 
 #[test]
 fn normalizes_relative_and_absolute_due_times() {
-    assert_eq!(DueTime::Relative(Duration::from_secs(5)).normalize(1_000), 6_000);
+    assert_eq!(
+        DueTime::Relative(Duration::from_secs(5)).normalize(1_000),
+        6_000
+    );
     assert_eq!(DueTime::AbsoluteUtcMs(9_000).normalize(1_000), 9_000);
 }
 
@@ -69,7 +72,10 @@ fn restart_fails_running_and_keeps_pending_due_for_single_dispatch() {
     let store = SchedulerStore::load(home.path()).expect("load");
     let running = store.get("running").expect("running");
     assert_eq!(running.state, TaskState::Failed);
-    assert_eq!(running.last_error.as_deref(), Some("interrupted_by_restart"));
+    assert_eq!(
+        running.last_error.as_deref(),
+        Some("interrupted_by_restart")
+    );
     assert_eq!(store.recoverable_due_task_ids(u64::MAX), vec!["pending"]);
 }
 
@@ -110,7 +116,10 @@ async fn dispatch_claims_before_call_and_never_dispatches_twice() {
         .expect("second dispatch");
 
     assert_eq!(*calls.lock().expect("calls"), vec![task.id.clone()]);
-    assert_eq!(store.get(&task.id).expect("task").state, TaskState::Succeeded);
+    assert_eq!(
+        store.get(&task.id).expect("task").state,
+        TaskState::Succeeded
+    );
 }
 
 #[tokio::test]
@@ -166,7 +175,10 @@ async fn busy_target_is_accepted_once_after_persisted_claim() {
         *calls.lock().expect("calls"),
         vec!["canonical-session-id".to_string()]
     );
-    assert_eq!(store.get(&task.id).expect("task").state, TaskState::Succeeded);
+    assert_eq!(
+        store.get(&task.id).expect("task").state,
+        TaskState::Succeeded
+    );
 }
 
 #[tokio::test]
@@ -197,5 +209,8 @@ async fn dispatch_records_failure_and_skips_non_pending_tasks() {
     let failed = store.get(&failed.id).expect("failed task");
     assert_eq!(failed.state, TaskState::Failed);
     assert_eq!(failed.last_error.as_deref(), Some("resume failed"));
-    assert_eq!(store.get(&cancelled.id).expect("cancelled").state, TaskState::Cancelled);
+    assert_eq!(
+        store.get(&cancelled.id).expect("cancelled").state,
+        TaskState::Cancelled
+    );
 }

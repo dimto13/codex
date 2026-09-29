@@ -42,10 +42,18 @@ struct CreateArgs {
     /// Message to send when the task becomes due.
     message: String,
     /// Delay from now in seconds.
-    #[arg(long, conflicts_with = "at_utc_ms", required_unless_present = "at_utc_ms")]
+    #[arg(
+        long,
+        conflicts_with = "at_utc_ms",
+        required_unless_present = "at_utc_ms"
+    )]
     in_seconds: Option<u64>,
     /// Absolute UTC Unix timestamp in milliseconds.
-    #[arg(long, conflicts_with = "in_seconds", required_unless_present = "in_seconds")]
+    #[arg(
+        long,
+        conflicts_with = "in_seconds",
+        required_unless_present = "in_seconds"
+    )]
     at_utc_ms: Option<u64>,
 }
 
@@ -72,7 +80,8 @@ pub(crate) async fn run(command: SchedulerCommand) -> anyhow::Result<()> {
                         message: task.prompt,
                         client_user_message_id: Default::default(),
                     };
-                    let response = codex_app_server_daemon::cli_queue_thread(&socket, params).await?;
+                    let response =
+                        codex_app_server_daemon::cli_queue_thread(&socket, params).await?;
                     Ok(serde_json::to_string(&response)?)
                 }
             })
@@ -102,7 +111,9 @@ fn list(codex_home: &Path) -> anyhow::Result<String> {
 
 fn status(codex_home: &Path, task_id: &str) -> anyhow::Result<String> {
     let store = SchedulerStore::load(codex_home)?;
-    Ok(serde_json::to_string_pretty(task_or_error(&store, task_id)?)?)
+    Ok(serde_json::to_string_pretty(task_or_error(
+        &store, task_id,
+    )?)?)
 }
 
 fn cancel(codex_home: &Path, task_id: &str) -> anyhow::Result<String> {
@@ -138,7 +149,10 @@ where
         .expect("scheduler results lock"))
 }
 
-fn task_or_error<'a>(store: &'a SchedulerStore, task_id: &str) -> anyhow::Result<&'a ScheduledTask> {
+fn task_or_error<'a>(
+    store: &'a SchedulerStore,
+    task_id: &str,
+) -> anyhow::Result<&'a ScheduledTask> {
     store
         .get(task_id)
         .with_context(|| format!("unknown task id: {task_id}"))
