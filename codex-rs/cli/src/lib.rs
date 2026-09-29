@@ -1,6 +1,7 @@
 pub(crate) mod debug_sandbox;
 mod exit_status;
 pub(crate) mod login;
+mod scheduler_task;
 
 use clap::Args;
 use clap::Parser;
@@ -32,7 +33,7 @@ pub struct SandboxStateArgs {
     )]
     pub sandbox_state_json: Option<String>,
 
-    /// Add a readable root to the supplied sandbox state. Repeat for multiple roots.
+    /// Add a readable root to the supplied sandbox state. Repeat for multiple paths.
     #[arg(
         long,
         requires = "sandbox_state_json",
