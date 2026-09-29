@@ -114,6 +114,62 @@ async fn dispatch_claims_before_call_and_never_dispatches_twice() {
 }
 
 #[tokio::test]
+async fn busy_target_is_accepted_once_after_persisted_claim() {
+    let home = TempDir::new().expect("tempdir");
+    let mut store = SchedulerStore::load(home.path()).expect("load");
+    let task = store
+        .create(
+            "canonical-session-id".to_string(),
+            DueTime::AbsoluteUtcMs(1),
+            "continue while busy".to_string(),
+        )
+        .expect("create");
+    let path = home.path().to_path_buf();
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let calls_for_dispatch = Arc::clone(&calls);
+
+    store
+        .dispatch_due(u64::MAX, move |claimed| {
+            let path = path.clone();
+            let calls = Arc::clone(&calls_for_dispatch);
+            async move {
+                let persisted: Vec<ScheduledTask> = serde_json::from_slice(
+                    &fs::read(path.join("scheduled_tasks.json")).expect("read persisted"),
+                )
+                .expect("parse persisted");
+                assert_eq!(persisted[0].state, TaskState::Running);
+                calls
+                    .lock()
+                    .expect("calls")
+                    .push(claimed.session_id.clone());
+                // Main's #28 queue path accepts a turn for a busy target by queueing it,
+                // so the scheduler seam observes a successful dispatch.
+                Ok(())
+            }
+        })
+        .await
+        .expect("busy target accepted");
+
+    let calls_for_second_dispatch = Arc::clone(&calls);
+    store
+        .dispatch_due(u64::MAX, move |claimed| {
+            let calls = Arc::clone(&calls_for_second_dispatch);
+            async move {
+                calls.lock().expect("calls").push(claimed.session_id);
+                Ok(())
+            }
+        })
+        .await
+        .expect("second dispatch");
+
+    assert_eq!(
+        *calls.lock().expect("calls"),
+        vec!["canonical-session-id".to_string()]
+    );
+    assert_eq!(store.get(&task.id).expect("task").state, TaskState::Succeeded);
+}
+
+#[tokio::test]
 async fn dispatch_records_failure_and_skips_non_pending_tasks() {
     let home = TempDir::new().expect("tempdir");
     let mut store = SchedulerStore::load(home.path()).expect("load");
