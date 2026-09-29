@@ -128,6 +128,49 @@ impl SchedulerStore {
             .collect()
     }
 
+    pub(crate) fn claim(&mut self, id: &str) -> Result<Option<ScheduledTask>> {
+        let now = now_utc_ms()?;
+        let Some(task) = self.tasks.iter_mut().find(|task| task.id == id) else {
+            return Ok(None);
+        };
+        if task.state != TaskState::Pending {
+            return Ok(None);
+        }
+        task.state = TaskState::Running;
+        task.updated_at_utc_ms = now;
+        task.last_error = None;
+        self.persist()?;
+        Ok(self.get(id).cloned())
+    }
+
+    pub(crate) fn succeed(&mut self, id: &str) -> Result<Option<ScheduledTask>> {
+        self.finish(id, TaskState::Succeeded, None)
+    }
+
+    pub(crate) fn fail(&mut self, id: &str, error: String) -> Result<Option<ScheduledTask>> {
+        self.finish(id, TaskState::Failed, Some(error))
+    }
+
+    fn finish(
+        &mut self,
+        id: &str,
+        state: TaskState,
+        last_error: Option<String>,
+    ) -> Result<Option<ScheduledTask>> {
+        let now = now_utc_ms()?;
+        let Some(task) = self.tasks.iter_mut().find(|task| task.id == id) else {
+            return Ok(None);
+        };
+        if task.state != TaskState::Running {
+            return Ok(None);
+        }
+        task.state = state;
+        task.updated_at_utc_ms = now;
+        task.last_error = last_error;
+        self.persist()?;
+        Ok(self.get(id).cloned())
+    }
+
     fn persist(&self) -> Result<()> {
         if let Some(parent) = self.path.parent() {
             fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
