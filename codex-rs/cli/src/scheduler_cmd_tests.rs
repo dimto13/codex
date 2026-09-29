@@ -125,8 +125,17 @@ async fn dispatch_due_prints_one_result_per_task_and_does_not_dispatch_twice() {
     .await
     .expect("dispatch");
 
-    assert_eq!(calls.lock().expect("calls lock").as_slice(), &[first_id.clone(), second_id.clone()]);
-    assert_eq!(results, vec![format!("accepted:{first_id}"), format!("accepted:{second_id}")]);
+    assert_eq!(
+        calls.lock().expect("calls lock").as_slice(),
+        &[first_id.clone(), second_id.clone()]
+    );
+    assert_eq!(
+        results,
+        vec![
+            format!("accepted:{first_id}"),
+            format!("accepted:{second_id}")
+        ]
+    );
 
     let second_calls = Arc::clone(&calls);
     let second_results = dispatch_due(home.path(), move |task| {
@@ -139,5 +148,8 @@ async fn dispatch_due_prints_one_result_per_task_and_does_not_dispatch_twice() {
     .await
     .expect("second dispatch");
     assert!(second_results.is_empty());
-    assert_eq!(calls.lock().expect("calls lock").as_slice(), &[first_id, second_id]);
+    assert_eq!(
+        calls.lock().expect("calls lock").as_slice(),
+        &[first_id, second_id]
+    );
 }
