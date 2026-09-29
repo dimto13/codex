@@ -203,8 +203,9 @@ impl SchedulerStore {
         let temp_path = self.path.with_extension("json.tmp");
         let bytes = serde_json::to_vec_pretty(&self.tasks)?;
         fs::write(&temp_path, bytes).with_context(|| format!("write {}", temp_path.display()))?;
-        fs::rename(&temp_path, &self.path)
-            .with_context(|| format!("rename {} to {}", temp_path.display(), self.path.display()))?;
+        fs::rename(&temp_path, &self.path).with_context(|| {
+            format!("rename {} to {}", temp_path.display(), self.path.display())
+        })?;
         Ok(())
     }
 }
