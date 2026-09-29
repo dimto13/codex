@@ -6,6 +6,8 @@ use clap::Args;
 use clap::Parser;
 use clap::Subcommand;
 use codex_app_server_protocol::ThreadQueueParams;
+use std::future::Future;
+use std::path::Path;
 use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
@@ -53,51 +55,89 @@ struct TaskIdArgs {
 #[allow(clippy::print_stdout)]
 pub(crate) async fn run(command: SchedulerCommand) -> anyhow::Result<()> {
     let codex_home = codex_core::config::find_codex_home()?;
-    let mut store = SchedulerStore::load(&codex_home)?;
     match command.command {
         SchedulerSubcommand::Create(args) => {
-            let due = match (args.in_seconds, args.at_utc_ms) {
-                (Some(seconds), None) => DueTime::Relative(Duration::from_secs(seconds)),
-                (None, Some(timestamp)) => DueTime::AbsoluteUtcMs(timestamp),
-                _ => anyhow::bail!("provide exactly one of --in-seconds or --at-utc-ms"),
-            };
-            let task = store.create(args.session_id, due, args.message)?;
-            println!("{}", task.id);
+            println!("{}", create(&codex_home, args)?);
         }
         SchedulerSubcommand::List => {
-            println!("{}", serde_json::to_string_pretty(store.list())?);
+            println!("{}", list(&codex_home)?);
         }
         SchedulerSubcommand::Status(args) => {
-            let task = task_or_error(&store, &args.task_id)?;
-            println!("{}", serde_json::to_string_pretty(task)?);
+            println!("{}", status(&codex_home, &args.task_id)?);
         }
         SchedulerSubcommand::Cancel(args) => {
-            let task = store
-                .cancel(&args.task_id)?
-                .with_context(|| format!("unknown task id: {}", args.task_id))?;
-            println!("{}", serde_json::to_string_pretty(&task)?);
+            println!("{}", cancel(&codex_home, &args.task_id)?);
         }
         SchedulerSubcommand::DispatchDue => {
             let socket = crate::app_server_control_socket_path()?;
-            let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
-            store
-                .dispatch_due(now, |task| {
-                    let socket = socket.clone();
-                    async move {
-                        let params = ThreadQueueParams {
-                            thread_id: task.session_id,
-                            message: task.prompt,
-                            client_user_message_id: Default::default(),
-                        };
-                        let response = codex_app_server_daemon::cli_queue_thread(&socket, params).await?;
-                        println!("{}", serde_json::to_string(&response)?);
-                        Ok(())
-                    }
-                })
-                .await?;
+            let results = dispatch_due(&codex_home, |task| {
+                let socket = socket.clone();
+                async move {
+                    let params = ThreadQueueParams {
+                        thread_id: task.session_id,
+                        message: task.prompt,
+                        client_user_message_id: Default::default(),
+                    };
+                    let response = codex_app_server_daemon::cli_queue_thread(&socket, params).await?;
+                    Ok(serde_json::to_string(&response)?)
+                }
+            })
+            .await?;
+            for result in results {
+                println!("{result}");
+            }
         }
     }
     Ok(())
+}
+
+fn create(codex_home: &Path, args: CreateArgs) -> anyhow::Result<String> {
+    let mut store = SchedulerStore::load(codex_home)?;
+    let due = match (args.in_seconds, args.at_utc_ms) {
+        (Some(seconds), None) => DueTime::Relative(Duration::from_secs(seconds)),
+        (None, Some(timestamp)) => DueTime::AbsoluteUtcMs(timestamp),
+        _ => anyhow::bail!("provide exactly one of --in-seconds or --at-utc-ms"),
+    };
+    Ok(store.create(args.session_id, due, args.message)?.id)
+}
+
+fn list(codex_home: &Path) -> anyhow::Result<String> {
+    let store = SchedulerStore::load(codex_home)?;
+    Ok(serde_json::to_string_pretty(store.list())?)
+}
+
+fn status(codex_home: &Path, task_id: &str) -> anyhow::Result<String> {
+    let store = SchedulerStore::load(codex_home)?;
+    Ok(serde_json::to_string_pretty(task_or_error(&store, task_id)?)?)
+}
+
+fn cancel(codex_home: &Path, task_id: &str) -> anyhow::Result<String> {
+    let mut store = SchedulerStore::load(codex_home)?;
+    let task = store
+        .cancel(task_id)?
+        .with_context(|| format!("unknown task id: {task_id}"))?;
+    Ok(serde_json::to_string_pretty(&task)?)
+}
+
+async fn dispatch_due<F, Fut>(codex_home: &Path, mut dispatch: F) -> anyhow::Result<Vec<String>>
+where
+    F: FnMut(ScheduledTask) -> Fut,
+    Fut: Future<Output = anyhow::Result<String>>,
+{
+    let mut store = SchedulerStore::load(codex_home)?;
+    let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
+    let mut results = Vec::new();
+    store
+        .dispatch_due(now, |task| {
+            let future = dispatch(task);
+            async {
+                let result = future.await?;
+                results.push(result);
+                Ok(())
+            }
+        })
+        .await?;
+    Ok(results)
 }
 
 fn task_or_error<'a>(store: &'a SchedulerStore, task_id: &str) -> anyhow::Result<&'a ScheduledTask> {
@@ -105,3 +145,7 @@ fn task_or_error<'a>(store: &'a SchedulerStore, task_id: &str) -> anyhow::Result
         .get(task_id)
         .with_context(|| format!("unknown task id: {task_id}"))
 }
+
+#[cfg(test)]
+#[path = "scheduler_cmd_tests.rs"]
+mod tests;
