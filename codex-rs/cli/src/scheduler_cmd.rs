@@ -8,6 +8,8 @@ use clap::Subcommand;
 use codex_app_server_protocol::ThreadQueueParams;
 use std::future::Future;
 use std::path::Path;
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
@@ -56,21 +58,13 @@ struct TaskIdArgs {
 pub(crate) async fn run(command: SchedulerCommand) -> anyhow::Result<()> {
     let codex_home = codex_core::config::find_codex_home()?;
     match command.command {
-        SchedulerSubcommand::Create(args) => {
-            println!("{}", create(&codex_home, args)?);
-        }
-        SchedulerSubcommand::List => {
-            println!("{}", list(&codex_home)?);
-        }
-        SchedulerSubcommand::Status(args) => {
-            println!("{}", status(&codex_home, &args.task_id)?);
-        }
-        SchedulerSubcommand::Cancel(args) => {
-            println!("{}", cancel(&codex_home, &args.task_id)?);
-        }
+        SchedulerSubcommand::Create(args) => println!("{}", create(&codex_home, args)?),
+        SchedulerSubcommand::List => println!("{}", list(&codex_home)?),
+        SchedulerSubcommand::Status(args) => println!("{}", status(&codex_home, &args.task_id)?),
+        SchedulerSubcommand::Cancel(args) => println!("{}", cancel(&codex_home, &args.task_id)?),
         SchedulerSubcommand::DispatchDue => {
             let socket = crate::app_server_control_socket_path()?;
-            let results = dispatch_due(&codex_home, |task| {
+            for result in dispatch_due(&codex_home, |task| {
                 let socket = socket.clone();
                 async move {
                     let params = ThreadQueueParams {
@@ -82,8 +76,8 @@ pub(crate) async fn run(command: SchedulerCommand) -> anyhow::Result<()> {
                     Ok(serde_json::to_string(&response)?)
                 }
             })
-            .await?;
-            for result in results {
+            .await?
+            {
                 println!("{result}");
             }
         }
@@ -126,18 +120,22 @@ where
 {
     let mut store = SchedulerStore::load(codex_home)?;
     let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
-    let mut results = Vec::new();
+    let results = Arc::new(Mutex::new(Vec::new()));
     store
         .dispatch_due(now, |task| {
             let future = dispatch(task);
-            async {
+            let results = Arc::clone(&results);
+            async move {
                 let result = future.await?;
-                results.push(result);
+                results.lock().expect("scheduler results lock").push(result);
                 Ok(())
             }
         })
         .await?;
-    Ok(results)
+    Ok(Arc::try_unwrap(results)
+        .expect("scheduler results still referenced")
+        .into_inner()
+        .expect("scheduler results lock"))
 }
 
 fn task_or_error<'a>(store: &'a SchedulerStore, task_id: &str) -> anyhow::Result<&'a ScheduledTask> {
