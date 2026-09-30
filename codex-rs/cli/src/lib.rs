@@ -1,7 +1,6 @@
 pub(crate) mod debug_sandbox;
 mod exit_status;
 pub(crate) mod login;
-mod scheduler_task;
 
 use clap::Args;
 use clap::Parser;
