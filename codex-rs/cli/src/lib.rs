@@ -33,7 +33,7 @@ pub struct SandboxStateArgs {
     )]
     pub sandbox_state_json: Option<String>,
 
-    /// Add a readable root to the supplied sandbox state. Repeat for multiple paths.
+    /// Add a readable root to the supplied sandbox state. Repeat for multiple roots.
     #[arg(
         long,
         requires = "sandbox_state_json",
