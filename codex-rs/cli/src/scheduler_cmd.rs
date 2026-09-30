@@ -138,15 +138,18 @@ where
             let results = Arc::clone(&results);
             async move {
                 let result = future.await?;
-                results.lock().expect("scheduler results lock").push(result);
+                results
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("scheduler results lock poisoned"))?
+                    .push(result);
                 Ok(())
             }
         })
         .await?;
-    Ok(Arc::try_unwrap(results)
-        .expect("scheduler results still referenced")
+    Arc::try_unwrap(results)
+        .map_err(|_| anyhow::anyhow!("scheduler results still referenced"))?
         .into_inner()
-        .expect("scheduler results lock"))
+        .map_err(|_| anyhow::anyhow!("scheduler results lock poisoned"))
 }
 
 fn task_or_error<'a>(
