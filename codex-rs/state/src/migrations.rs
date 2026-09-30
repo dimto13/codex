@@ -93,3 +93,23 @@ WHERE version = ?
 #[cfg(test)]
 #[path = "migrations_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod migration_version_uniqueness_tests {
+    use std::collections::HashSet;
+
+    use super::STATE_MIGRATOR;
+
+    #[test]
+    fn state_migration_versions_are_unique() {
+        let mut seen = HashSet::new();
+        for migration in STATE_MIGRATOR.iter() {
+            assert!(
+                seen.insert(migration.version),
+                "duplicate state migration version {} ({})",
+                migration.version,
+                migration.description
+            );
+        }
+    }
+}
