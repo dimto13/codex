@@ -57,6 +57,13 @@ mode = "full"
         return Ok(());
     }
 
+    // bubblewrap cannot build the sandbox when the host forbids unprivileged
+    // user namespaces; the probe never ran, so there is nothing to assert.
+    if stderr.contains("No permissions to create new namespace") {
+        eprintln!("skipping: bubblewrap cannot create user namespaces on this host");
+        return Ok(());
+    }
+
     assert_eq!(
         output.status.code(),
         Some(7),
