@@ -71,7 +71,7 @@ pub(crate) async fn run(command: SchedulerCommand) -> anyhow::Result<()> {
         SchedulerSubcommand::Status(args) => println!("{}", status(&codex_home, &args.task_id)?),
         SchedulerSubcommand::Cancel(args) => println!("{}", cancel(&codex_home, &args.task_id)?),
         SchedulerSubcommand::DispatchDue => {
-            let socket = crate::app_server_control_socket_path()?;
+            let socket = codex_app_server::app_server_control_socket_path(&codex_home)?;
             for result in dispatch_due(&codex_home, |task| {
                 let socket = socket.clone();
                 async move {
