@@ -1,6 +1,7 @@
 use clap::Parser;
 use codex_app_server_protocol::ThreadQueueParams;
 use codex_app_server_protocol::ThreadStatusGetParams;
+use codex_core::config::find_codex_home;
 
 /// Queue a message into an existing session, or print its status.
 #[derive(Debug, Parser)]
@@ -17,7 +18,8 @@ pub struct QueueCommand {
 
 #[allow(clippy::print_stdout)]
 pub async fn run(cmd: QueueCommand) -> anyhow::Result<()> {
-    let socket = crate::app_server_control_socket_path()?;
+    let codex_home = find_codex_home()?;
+    let socket = codex_app_server::app_server_control_socket_path(&codex_home)?;
     if cmd.status {
         let params = ThreadStatusGetParams {
             thread_id: cmd.thread_id,
