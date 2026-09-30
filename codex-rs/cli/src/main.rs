@@ -66,6 +66,7 @@ mod remote_control_cmd;
 #[cfg(target_os = "windows")]
 mod sandbox_setup;
 mod scheduler_cmd;
+mod scheduler_task;
 mod state_db_recovery;
 #[cfg(not(windows))]
 mod wsl_paths;

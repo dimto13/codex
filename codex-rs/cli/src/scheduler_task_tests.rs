@@ -31,7 +31,7 @@ fn persistence_round_trip_and_cancel_are_stable() {
         .expect("create");
 
     let mut reloaded = SchedulerStore::load(home.path()).expect("reload");
-    assert_eq!(reloaded.list(), &[created.clone()]);
+    assert_eq!(reloaded.list(), std::slice::from_ref(&created));
     let cancelled = reloaded.cancel(&created.id).expect("cancel").expect("task");
     assert_eq!(cancelled.state, TaskState::Cancelled);
     let cancelled_again = reloaded
