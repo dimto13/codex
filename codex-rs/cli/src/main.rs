@@ -65,6 +65,8 @@ mod queue_cmd;
 mod remote_control_cmd;
 #[cfg(target_os = "windows")]
 mod sandbox_setup;
+mod scheduler_cmd;
+mod scheduler_task;
 mod state_db_recovery;
 #[cfg(not(windows))]
 mod wsl_paths;
@@ -224,6 +226,8 @@ enum Subcommand {
     Features(FeaturesCli),
     /// Queue a message into an existing session.
     Queue(queue_cmd::QueueCommand),
+    /// Schedule one-shot turns for existing sessions.
+    Scheduler(scheduler_cmd::SchedulerCommand),
 }
 
 #[derive(Debug, Parser)]
@@ -1769,6 +1773,9 @@ async fn cli_main(
                 disable_feature_in_config(&feature).await?;
             }
         },
+        Some(Subcommand::Scheduler(scheduler_cli)) => {
+            scheduler_cmd::run(scheduler_cli).await?;
+        }
     }
 
     Ok(())
@@ -2251,6 +2258,7 @@ fn unsupported_subcommand_name_for_strict_config(
             Some(app_server_subcommand_name(app_server.subcommand.as_ref()))
         }
         Some(Subcommand::Queue(_)) => Some("queue"),
+        Some(Subcommand::Scheduler(_)) => Some("scheduler"),
         Some(Subcommand::RemoteControl(remote_control)) => Some(remote_control.subcommand_name()),
         Some(Subcommand::Mcp(_)) => Some("mcp"),
         Some(Subcommand::Plugin(_)) => Some("plugin"),
