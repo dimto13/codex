@@ -57,6 +57,7 @@ mod aren_update;
 mod desktop_app;
 mod doctor;
 mod exec_server_telemetry;
+mod execution_start_watchdog;
 mod interactive_search;
 mod marketplace_cmd;
 mod mcp_cmd;
