@@ -4,6 +4,7 @@ use codex_protocol::dynamic_tools::DynamicToolCallOutputContentItem;
 use codex_protocol::dynamic_tools::DynamicToolFunctionSpec;
 use codex_protocol::dynamic_tools::DynamicToolResponse;
 use codex_protocol::dynamic_tools::DynamicToolSpec;
+use codex_protocol::openai_models::ApplyPatchToolType;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::Op;
 use codex_protocol::user_input::UserInput;
@@ -355,6 +356,97 @@ async fn oss_interactive_search_keeps_chrome_tools_visible_in_large_catalog() ->
             .count()
             <= MAX_VISIBLE_OSS_MCP_TOOLS
     );
+    server.verify().await;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ollama_responses_coding_tool_turn_executes_and_completes() -> anyhow::Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let server = responses::start_mock_server().await;
+    let call_id = "call-ollama-exec";
+    let call_mock = mount_sse_once(
+        &server,
+        responses::sse(vec![
+            responses::ev_response_created("resp-ollama-1"),
+            responses::ev_function_call(
+                call_id,
+                "exec_command",
+                &serde_json::to_string(&json!({
+                    "cmd": "echo ollama-tool-ok",
+                    "yield_time_ms": 1_000,
+                }))?,
+            ),
+            responses::ev_completed("resp-ollama-1"),
+        ]),
+    )
+    .await;
+    let final_mock = mount_sse_once(
+        &server,
+        responses::sse(vec![
+            responses::ev_assistant_message("msg-ollama", "Tool execution completed."),
+            responses::ev_completed("resp-ollama-2"),
+        ]),
+    )
+    .await;
+
+    let mut ollama_provider =
+        create_oss_provider_with_base_url(&format!("{}/v1", server.uri()), WireApi::Responses);
+    ollama_provider.name = "Ollama".to_string();
+    let test = test_codex()
+        .with_model_info_override("gpt-5.5", |model| {
+            model.apply_patch_tool_type = Some(ApplyPatchToolType::Freeform);
+        })
+        .with_config(move |config| config.model_provider = ollama_provider)
+        .build_with_auto_env(&server)
+        .await?;
+
+    test.codex
+        .submit(Op::UserInput {
+            items: vec![UserInput::Text {
+                text: "Run a shell command that prints ollama-tool-ok.".to_string(),
+                text_elements: Vec::new(),
+            }],
+            final_output_json_schema: None,
+            responsesapi_client_metadata: None,
+            additional_context: Default::default(),
+            thread_settings: Default::default(),
+        })
+        .await?;
+
+    wait_for_event(&test.codex, |event| {
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
+
+    let initial_request = call_mock.single_request();
+    let initial_body = initial_request.body_json();
+    let tools = initial_body["tools"]
+        .as_array()
+        .expect("Ollama request should contain coding tools");
+    assert!(
+        tools
+            .iter()
+            .all(|tool| !matches!(tool["type"].as_str(), Some("custom" | "tool_search")))
+    );
+    assert!(
+        tools.iter().all(|tool| tool["name"] != "apply_patch"),
+        "Ollama request must filter the model-enabled custom apply_patch tool"
+    );
+    let exec_tool = tools
+        .iter()
+        .find(|tool| tool["name"] == "exec_command")
+        .expect("Ollama request should expose exec_command");
+    assert_eq!(exec_tool["type"], "function");
+
+    let final_request = final_mock.single_request();
+    let output = final_request.function_call_output(call_id)["output"]
+        .as_str()
+        .expect("post-tool Ollama request should contain command output")
+        .to_string();
+    assert!(output.contains("ollama-tool-ok"));
     server.verify().await;
 
     Ok(())
