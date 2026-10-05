@@ -87,6 +87,21 @@ pub fn create_tools_json_for_responses_api(
     Ok(tools_json)
 }
 
+/// Serializes Responses tools into the subset accepted by Ollama's OpenAI-compatible endpoint.
+///
+/// Ollama 0.32.x supports function, namespace, and web-search tools, but not OpenAI custom
+/// freeform tools or tool-search declarations. Keep supported coding tools intact and omit only
+/// the unsupported representations for the built-in Ollama provider.
+pub fn create_tools_json_for_ollama_responses_api(
+    tools: &[ToolSpec],
+) -> Result<Vec<Value>, serde_json::Error> {
+    tools
+        .iter()
+        .filter(|tool| !matches!(tool, ToolSpec::Freeform(_) | ToolSpec::ToolSearch { .. }))
+        .map(serde_json::to_value)
+        .collect()
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct ResponsesApiWebSearchFilters {
     #[serde(skip_serializing_if = "Option::is_none")]

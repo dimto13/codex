@@ -8,6 +8,7 @@ use crate::FreeformToolFormat;
 use crate::JsonSchema;
 use crate::ResponsesApiNamespaceTool;
 use crate::ResponsesApiTool;
+use crate::create_tools_json_for_ollama_responses_api;
 use crate::create_tools_json_for_responses_api;
 use codex_protocol::config_types::WebSearchContextSize;
 use codex_protocol::config_types::WebSearchFilters as ConfigWebSearchFilters;
@@ -260,5 +261,82 @@ fn tool_search_tool_spec_serializes_expected_wire_shape() {
                 "additionalProperties": false,
             },
         })
+    );
+}
+
+#[test]
+fn ollama_responses_tools_omit_unsupported_custom_and_tool_search_tools() {
+    let tools = [
+        ToolSpec::Freeform(FreeformTool {
+            name: "apply_patch".to_string(),
+            description: "Apply a patch".to_string(),
+            format: FreeformToolFormat {
+                r#type: "grammar".to_string(),
+                syntax: "lark".to_string(),
+                definition: "start: /.+/".to_string(),
+            },
+        }),
+        ToolSpec::ToolSearch {
+            execution: "sync".to_string(),
+            description: "Search for tools".to_string(),
+            parameters: JsonSchema::object(
+                BTreeMap::new(),
+                /*required*/ None,
+                /*additional_properties*/ None,
+            ),
+        },
+        ToolSpec::Namespace(ResponsesApiNamespace {
+            name: "mcp__demo__".to_string(),
+            description: "Demo tools".to_string(),
+            tools: vec![ResponsesApiNamespaceTool::Function(ResponsesApiTool {
+                name: "lookup_order".to_string(),
+                description: "Look up an order".to_string(),
+                strict: false,
+                defer_loading: None,
+                parameters: JsonSchema::object(
+                    BTreeMap::new(),
+                    /*required*/ None,
+                    /*additional_properties*/ None,
+                ),
+                output_schema: None,
+            })],
+        }),
+        ToolSpec::Function(ResponsesApiTool {
+            name: "exec_command".to_string(),
+            description: "Run a shell command".to_string(),
+            strict: false,
+            defer_loading: None,
+            parameters: JsonSchema::object(
+                BTreeMap::new(),
+                /*required*/ None,
+                /*additional_properties*/ None,
+            ),
+            output_schema: None,
+        }),
+    ];
+
+    assert_eq!(
+        create_tools_json_for_ollama_responses_api(&tools).expect("serialize Ollama tools"),
+        vec![
+            json!({
+                "type": "namespace",
+                "name": "mcp__demo__",
+                "description": "Demo tools",
+                "tools": [{
+                    "type": "function",
+                    "name": "lookup_order",
+                    "description": "Look up an order",
+                    "strict": false,
+                    "parameters": { "type": "object", "properties": {} },
+                }],
+            }),
+            json!({
+                "type": "function",
+                "name": "exec_command",
+                "description": "Run a shell command",
+                "strict": false,
+                "parameters": { "type": "object", "properties": {} },
+            }),
+        ]
     );
 }

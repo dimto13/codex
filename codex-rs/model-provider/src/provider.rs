@@ -7,6 +7,7 @@ use std::sync::Arc;
 use codex_api::ApiError;
 use codex_api::Provider;
 use codex_api::SharedAuthProvider;
+use codex_api::TransportError;
 use codex_login::AuthManager;
 use codex_login::CodexAuth;
 use codex_model_provider_info::ModelProviderInfo;
@@ -262,6 +263,25 @@ impl ModelProvider for ConfiguredModelProvider {
         &self.info
     }
 
+    fn map_api_error(&self, error: ApiError) -> CodexErr {
+        if self.info.is_ollama()
+            && let ApiError::Transport(TransportError::Http {
+                status,
+                body: Some(body),
+                ..
+            }) = &error
+            && *status == http::StatusCode::INTERNAL_SERVER_ERROR
+            && !body.trim().is_empty()
+        {
+            return CodexErr::InvalidRequest(format!(
+                "Ollama rejected the Responses request with HTTP {status}: {}",
+                body.trim()
+            ));
+        }
+
+        codex_api::map_api_error(error)
+    }
+
     fn capabilities(&self) -> ProviderCapabilities {
         if self.info.is_oss() {
             ProviderCapabilities {
@@ -506,6 +526,43 @@ mod tests {
             .expect("auth should resolve");
 
         assert!(auth.auth.to_auth_headers().is_empty());
+    }
+
+    #[test]
+    fn ollama_http_500_with_body_is_non_retryable_and_preserves_provider_error() {
+        let mut provider_info =
+            create_oss_provider_with_base_url("http://localhost:11434/v1", WireApi::Responses);
+        provider_info.name = "Ollama".to_string();
+        let provider = create_model_provider(provider_info, /*auth_manager*/ None);
+        let error = provider.map_api_error(ApiError::Transport(TransportError::Http {
+            status: http::StatusCode::INTERNAL_SERVER_ERROR,
+            url: Some("http://localhost:11434/v1/responses".to_string()),
+            headers: None,
+            body: Some(r#"{"error":"qwen tool call parsing failed: unexpected EOF"}"#.to_string()),
+        }));
+
+        assert_eq!(
+            error.to_string(),
+            "Ollama rejected the Responses request with HTTP 500 Internal Server Error: {\"error\":\"qwen tool call parsing failed: unexpected EOF\"}"
+        );
+        assert!(!error.is_retryable());
+    }
+
+    #[test]
+    fn openai_http_500_remains_retryable() {
+        let provider = create_model_provider(
+            ModelProviderInfo::create_openai_provider(/*base_url*/ None),
+            /*auth_manager*/ None,
+        );
+        let error = provider.map_api_error(ApiError::Transport(TransportError::Http {
+            status: http::StatusCode::INTERNAL_SERVER_ERROR,
+            url: Some("https://api.openai.com/v1/responses".to_string()),
+            headers: None,
+            body: Some(r#"{"error":"internal"}"#.to_string()),
+        }));
+
+        assert!(matches!(error, CodexErr::InternalServerError));
+        assert!(error.is_retryable());
     }
 
     #[test]
