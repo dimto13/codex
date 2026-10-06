@@ -3,6 +3,7 @@ use super::CompactConversationRequestSettings;
 use super::ModelClient;
 use super::PendingUnauthorizedRetry;
 use super::Prompt;
+use super::normalize_ollama_instruction_messages;
 use super::UnauthorizedRecoveryExecution;
 use super::X_CODEX_INSTALLATION_ID_HEADER;
 use super::X_CODEX_PARENT_THREAD_ID_HEADER;
@@ -288,6 +289,44 @@ fn test_session_telemetry() -> SessionTelemetry {
         "test-terminal".to_string(),
         SessionSource::Cli,
     )
+}
+
+#[test]
+fn ollama_instruction_messages_are_consolidated_before_history() -> anyhow::Result<()> {
+    let message = |role: &str, text: &str| ResponseItem::Message {
+        id: None,
+        role: role.to_string(),
+        content: vec![ContentItem::InputText {
+            text: text.to_string(),
+        }],
+        phase: None,
+        internal_chat_message_metadata_passthrough: None,
+    };
+    let mut input = vec![
+        message("user", "first user"),
+        message("assistant", "first assistant"),
+        message("developer", "late developer"),
+        message("system", "late system"),
+        message("user", "second user"),
+    ];
+    let mut instructions = "base instructions".to_string();
+
+    normalize_ollama_instruction_messages(&mut input, &mut instructions)?;
+
+    assert_eq!(
+        instructions,
+        "base instructions\n\nlate developer\n\nlate system"
+    );
+    assert_eq!(
+        input,
+        vec![
+            message("user", "first user"),
+            message("assistant", "first assistant"),
+            message("user", "second user"),
+        ]
+    );
+
+    Ok(())
 }
 
 #[test]
