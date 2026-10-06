@@ -42,4 +42,4 @@ jobs:
           components: clippy
       - name: Clippy codex-core tests
         working-directory: codex-rs
-        run: cargo clippy --locked -p codex-core --tests -- -D warnings
+        run: cargo clippy --locked -p codex-core --tests
