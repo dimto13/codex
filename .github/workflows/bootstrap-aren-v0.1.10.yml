@@ -1,0 +1,46 @@
+name: bootstrap-aren-v0.1.10
+
+on:
+  push:
+    branches:
+      - release/bootstrap-aren-v0.1.10
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  tag-and-dispatch:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Create exact release tag and dispatch canonical release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: aren-v0.1.10
+          RELEASE_SHA: 44df685eb6aca62277cb15acb887c16e5b223f84
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          current="$(
+            gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}"               --jq '.object.sha' 2>/dev/null || true
+          )"
+
+          if [[ -n "${current}" ]]; then
+            if [[ "${current}" != "${RELEASE_SHA}" ]]; then
+              echo "Tag ${RELEASE_TAG} already exists at unexpected SHA ${current}" >&2
+              exit 1
+            fi
+            echo "Tag already exists at expected SHA."
+          else
+            gh api               --method POST               "repos/${GITHUB_REPOSITORY}/git/refs"               -f "ref=refs/tags/${RELEASE_TAG}"               -f "sha=${RELEASE_SHA}"
+
+            created="$(
+              gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}"                 --jq '.object.sha'
+            )"
+            test "${created}" = "${RELEASE_SHA}"
+          fi
+
+          gh workflow run aren-release.yml             --repo "${GITHUB_REPOSITORY}"             --ref "${RELEASE_TAG}"
+
+          echo "Created/verified ${RELEASE_TAG} -> ${RELEASE_SHA} and dispatched aren-release."
