@@ -22,11 +22,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          current="$(
-            gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}"               --jq '.object.sha' 2>/dev/null || true
-          )"
-
-          if [[ -n "${current}" ]]; then
+          if current="$(
+            gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}"               --jq '.object.sha' 2>/dev/null
+          )"; then
             if [[ "${current}" != "${RELEASE_SHA}" ]]; then
               echo "Tag ${RELEASE_TAG} already exists at unexpected SHA ${current}" >&2
               exit 1
