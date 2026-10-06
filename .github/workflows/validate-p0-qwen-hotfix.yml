@@ -1,0 +1,46 @@
+name: validate-p0-qwen-hotfix
+
+on:
+  push:
+    branches:
+      - validation/p0-qwen-targeted
+
+permissions:
+  contents: read
+
+env:
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+
+jobs:
+  exact-head:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: dcc0223e97c186c6993c87854df851308f5feefa
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-ci
+
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582
+        with:
+          components: rustfmt,clippy
+
+      - name: Format
+        working-directory: codex-rs
+        run: cargo fmt -- --config imports_granularity=Item --check
+
+      - name: Build release CLI
+        working-directory: codex-rs
+        run: cargo build --locked --release -p codex-cli --bin codex
+
+      - name: Test codex-core
+        working-directory: codex-rs
+        env:
+          RUST_MIN_STACK: "10485760"
+        run: cargo test --locked -p codex-core
+
+      - name: Clippy codex-core tests
+        working-directory: codex-rs
+        run: cargo clippy --locked -p codex-core --tests -- -D warnings
