@@ -505,10 +505,9 @@ async fn ollama_responses_coding_tool_turn_executes_and_completes() -> anyhow::R
             .as_array()
             .expect("Ollama Responses request should contain an input array");
         assert!(
-            input.iter().all(|item| !matches!(
-                item["role"].as_str(),
-                Some("system" | "developer")
-            )),
+            input
+                .iter()
+                .all(|item| !matches!(item["role"].as_str(), Some("system" | "developer"))),
             "Ollama request history must not contain late system/developer messages: {input:?}"
         );
     }
