@@ -391,6 +391,14 @@ async fn ollama_responses_coding_tool_turn_executes_and_completes() -> anyhow::R
         ]),
     )
     .await;
+    let second_turn_mock = mount_sse_once(
+        &server,
+        responses::sse(vec![
+            responses::ev_assistant_message("msg-ollama-2", "Second turn completed."),
+            responses::ev_completed("resp-ollama-3"),
+        ]),
+    )
+    .await;
 
     let mut ollama_provider =
         create_oss_provider_with_base_url(&format!("{}/v1", server.uri()), WireApi::Responses);
@@ -407,6 +415,24 @@ async fn ollama_responses_coding_tool_turn_executes_and_completes() -> anyhow::R
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "Run a shell command that prints ollama-tool-ok.".to_string(),
+                text_elements: Vec::new(),
+            }],
+            final_output_json_schema: None,
+            responsesapi_client_metadata: None,
+            additional_context: Default::default(),
+            thread_settings: Default::default(),
+        })
+        .await?;
+
+    wait_for_event(&test.codex, |event| {
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
+
+    test.codex
+        .submit(Op::UserInput {
+            items: vec![UserInput::Text {
+                text: "Confirm the previous tool result in a second turn.".to_string(),
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
@@ -447,6 +473,45 @@ async fn ollama_responses_coding_tool_turn_executes_and_completes() -> anyhow::R
         .expect("post-tool Ollama request should contain command output")
         .to_string();
     assert!(output.contains("ollama-tool-ok"));
+
+    let second_turn_request = second_turn_mock.single_request();
+    let second_turn_body = second_turn_request.body_json();
+    let second_turn_input = second_turn_body["input"]
+        .as_array()
+        .expect("second-turn Ollama request should contain history");
+    let function_call_index = second_turn_input
+        .iter()
+        .position(|item| item["type"] == "function_call")
+        .expect("second-turn history should retain the prior function call");
+    let function_output_index = second_turn_input
+        .iter()
+        .position(|item| item["type"] == "function_call_output")
+        .expect("second-turn history should retain the prior function output");
+    let latest_user_index = second_turn_input
+        .iter()
+        .rposition(|item| item["role"] == "user")
+        .expect("second-turn history should contain the latest user message");
+    assert!(function_call_index < function_output_index);
+    assert!(function_output_index < latest_user_index);
+
+    for body in [initial_body, final_request.body_json(), second_turn_body] {
+        assert!(
+            body["instructions"]
+                .as_str()
+                .is_some_and(|instructions| !instructions.is_empty()),
+            "Ollama requests should carry consolidated leading instructions"
+        );
+        let input = body["input"]
+            .as_array()
+            .expect("Ollama Responses request should contain an input array");
+        assert!(
+            input
+                .iter()
+                .all(|item| !matches!(item["role"].as_str(), Some("system" | "developer"))),
+            "Ollama request history must not contain late system/developer messages: {input:?}"
+        );
+    }
+
     server.verify().await;
 
     Ok(())

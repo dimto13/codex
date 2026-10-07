@@ -226,6 +226,51 @@ fn last_input_is_tool_output(prompt: &Prompt) -> bool {
     })
 }
 
+fn normalize_ollama_instruction_messages(
+    input: &mut Vec<ResponseItem>,
+    instructions: &mut String,
+) -> Result<()> {
+    let mut retained = Vec::with_capacity(input.len());
+    let mut instruction_parts = Vec::new();
+
+    for item in input.drain(..) {
+        match item {
+            ResponseItem::Message { role, content, .. }
+                if matches!(role.as_str(), "system" | "developer") =>
+            {
+                let mut text_parts = Vec::with_capacity(content.len());
+                for content_item in content {
+                    match content_item {
+                        ContentItem::InputText { text } | ContentItem::OutputText { text } => {
+                            text_parts.push(text);
+                        }
+                        ContentItem::InputImage { .. } => {
+                            return Err(CodexErr::InvalidRequest(
+                                "Ollama system/developer instructions cannot contain images"
+                                    .to_string(),
+                            ));
+                        }
+                    }
+                }
+                if !text_parts.is_empty() {
+                    instruction_parts.push(text_parts.join("\n"));
+                }
+            }
+            item => retained.push(item),
+        }
+    }
+
+    *input = retained;
+    if !instruction_parts.is_empty() {
+        if !instructions.is_empty() {
+            instructions.push_str("\n\n");
+        }
+        instructions.push_str(&instruction_parts.join("\n\n"));
+    }
+
+    Ok(())
+}
+
 fn reasoning_effort_for_request(effort: ReasoningEffortConfig) -> ReasoningEffortConfig {
     match effort {
         ReasoningEffortConfig::Ultra => ReasoningEffortConfig::Max,
@@ -888,6 +933,7 @@ impl ModelClient {
     ) -> Result<ResponsesApiRequest> {
         let mut input = prompt.get_formatted_input_for_request(model_info.use_responses_lite);
         let is_openai = self.state.provider.info().is_openai();
+        let is_ollama = self.state.provider.info().is_ollama();
         if !is_openai {
             input
                 .iter_mut()
@@ -949,12 +995,12 @@ impl ModelClient {
                     OssToolRouting::Suppress => &[],
                 }
             };
-        let tools = if self.state.provider.info().is_ollama() {
+        let tools = if is_ollama {
             create_tools_json_for_ollama_responses_api(request_tools)?
         } else {
             create_tools_json_for_responses_api(request_tools)?
         };
-        let (instructions, tools) = if model_info.use_responses_lite {
+        let (mut instructions, tools) = if model_info.use_responses_lite {
             let mut prefix = vec![ResponseItem::AdditionalTools {
                 id: None,
                 role: "developer".to_string(),
@@ -976,6 +1022,9 @@ impl ModelClient {
         } else {
             (prompt.base_instructions.text.clone(), Some(tools))
         };
+        if is_ollama {
+            normalize_ollama_instruction_messages(&mut input, &mut instructions)?;
+        }
         let reasoning = Self::build_reasoning(model_info, effort, summary);
         let stream_options = (self.state.concurrent_reasoning_summaries_enabled
             && is_openai
