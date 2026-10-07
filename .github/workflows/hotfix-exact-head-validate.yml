@@ -33,7 +33,9 @@ jobs:
         run: test "$(git rev-parse HEAD)" = "76725b738b5e26d3e746bf72f3b65ead06e120dd"
       - name: Build codex-core
         run: cargo build -p codex-core
-      - name: Test codex-core
-        run: just test -p codex-core
+      - name: Test Ollama instruction normalization
+        run: just test -p codex-core ollama_instruction_messages_are_consolidated_before_history
+      - name: Test Ollama tool round-trip and second turn
+        run: just test -p codex-core ollama_responses_coding_tool_turn_executes_and_completes
       - name: Clippy codex-core
         run: cargo clippy -p codex-core --tests -- -D warnings
