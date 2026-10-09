@@ -1,0 +1,40 @@
+name: aren-tag-bootstrap
+
+# #88 / #94: guarded release transition. Dispatch with an explicitly authorized
+# tag and exact fully-green main SHA; never invent a version or advance main.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Exact authorized Aren release tag (aren-vX.Y.Z)
+        required: true
+        type: string
+      sha:
+        description: Exact green main commit SHA (40 lowercase hex characters)
+        required: true
+        type: string
+
+concurrency:
+  group: aren-tag-bootstrap-${{ inputs.tag }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  actions: write
+  checks: read
+
+jobs:
+  qualify-tag-dispatch:
+    name: Verify main CI, tag and dispatch canonical release
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify and create exact release tag
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_SHA: ${{ inputs.sha }}
+        run: python3 .github/scripts/aren_release_tag.py "$RELEASE_TAG" "$RELEASE_SHA"
