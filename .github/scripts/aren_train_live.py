@@ -31,10 +31,40 @@ def authorized_issue(body: str) -> int:
     next_action = NEXT_ACTION.search(checkpoint.group(1))
     if not next_action:
         raise GateError("Missing EXACT NEXT ACTION in LIVE CHECKPOINT")
-    matches = re.findall(r"\bactivate[ \t]+#([0-9]+)\b", next_action.group(1), re.I)
-    if len(matches) != 1:
-        raise GateError("Exactly one explicitly activated issue is required")
-    return int(matches[0])
+    # PLAN's next-queue activation is not a CHAT1 authorization.
+    assignments = re.findall(
+        r"(?m)^\*\*CHAT1(?:/[^*]+)?:\*\*[ \t]*(.*)$",
+        next_action.group(1),
+    )
+    if len(assignments) != 1:
+        raise GateError("Exactly one explicit CHAT1 assignment required")
+    action = assignments[0]
+    explicit = re.findall(r"\bactivate[ \t]+#([0-9]+)\b", action, re.I)
+    if len(explicit) > 1:
+        raise GateError("Multiple CHAT1 activations are ambiguous")
+
+    live = re.search(
+        r"(?ms)^### Live state[ \t]*\n(.*?)(?=^### |\Z)",
+        checkpoint.group(1),
+    )
+    active = (
+        re.findall(r"(?m)^-[ \t]+\*\*#([0-9]+):\*\*[ \t]+ACTIVE\b", live.group(1))
+        if live else []
+    )
+    if len(active) > 1:
+        raise GateError("Multiple ACTIVE items in authoritative LIVE CHECKPOINT")
+
+    if explicit:
+        issue = int(explicit[0])
+        if active and int(active[0]) != issue:
+            raise GateError("CHAT1 activation conflicts with LIVE ACTIVE item")
+        return issue
+
+    if not re.search(r"\b(?:continue|implement|execute)\b", action, re.I):
+        raise GateError("CHAT1 continuation instruction missing")
+    if len(active) != 1:
+        raise GateError("Exactly one LIVE ACTIVE issue required for continuation")
+    return int(active[0])
 
 
 def open_active_control(api: GitHub) -> dict:
