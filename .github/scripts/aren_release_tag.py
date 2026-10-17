@@ -51,9 +51,31 @@ class GitHub:
                 raw = response.read()
                 return json.loads(raw) if raw else None
         except urllib.error.HTTPError as exc:
-            if exc.code == 404:
+            if exc.code == 404 and method == "GET":
                 return None
             raise GateError(f"GitHub {method} {path}: HTTP {exc.code}") from exc
+
+    def graphql(self, query: str, variables: dict | None = None):
+        data = json.dumps({"query": query, "variables": variables or {}}).encode()
+        request = urllib.request.Request(
+            "https://api.github.com/graphql",
+            data=data,
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {self.token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+                "User-Agent": "aren-train-controller",
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                payload = json.loads(response.read())
+        except urllib.error.HTTPError as exc:
+            raise GateError(f"GitHub GraphQL: HTTP {exc.code}") from exc
+        if payload.get("errors"):
+            raise GateError(f"GitHub GraphQL errors: {payload['errors']}")
+        return payload.get("data") or {}
 
 
 def verify_main_ci(api: GitHub, sha: str) -> None:
@@ -95,6 +117,10 @@ def ensure_tag_and_release(api: GitHub, tag: str, sha: str) -> str:
         result = "existing"
     else:
         api.request("POST", "git/refs", {"ref": f"refs/tags/{tag}", "sha": sha})
+        created = api.request("GET", f"git/ref/tags/{tag}")
+        target = (created or {}).get("object", {})
+        if target.get("type") != "commit" or target.get("sha") != sha:
+            raise GateError("Tag write did not produce the exact requested commit ref")
         result = "created"
 
     # GITHUB_TOKEN-created tags do not fire tag-push workflows. Explicit dispatch
