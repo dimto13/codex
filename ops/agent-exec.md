@@ -88,14 +88,34 @@ mechanical changes where a diff is genuinely easier to produce.
 - On failure, nothing is pushed. Read the linked job log, fix the root cause,
   post a corrected payload. Never repost an identical failing payload.
 
-## Freshness of pull-request checks
+## Getting CI on your exact head — `/agent-ci`
 
-When the repository secret `AREN_AGENT_PAT` exists (a fine-grained PAT with
-`contents: write` on this repository), `agent-exec` pushes with it and the
-resulting pull-request CI re-runs on the new head.
+Your pushes do not schedule `pull_request` workflow runs. A pull request can
+therefore sit with several commits and no checks at all, which is what left
+PR #96 unmergeable for days: the merge lane's first gate wants green CI on the
+exact head, and no run ever appeared.
 
-Without that secret the push still lands, but GitHub suppresses workflow runs
-for pushes made with `GITHUB_TOKEN`. The pull request then shows checks from an
-older head. Those are stale and must not be used to satisfy the merge lane —
-open the pull request only after the final `agent-exec` push, so the
-`pull_request` open event produces CI on the real head.
+Ask for one:
+
+```markdown
+/agent-ci chat1/94-autonomous-train-controller
+```
+
+One line, the branch name as the only argument, on the issue labelled
+`agent:exec`. The workflow dispatches `aren-ci` at that branch's head and
+replies with the head SHA it used.
+
+Then poll the check runs **for that SHA**, not the pull request's badge:
+
+- a run whose head SHA equals the head you intend to merge, from a
+  `pull_request` or `workflow_dispatch` event, with every blocking job
+  `completed` and `success`, is valid evidence;
+- anything on an older commit is not, however green it looks.
+
+Re-run `/agent-ci` after every `agent-exec` push. A head change invalidates all
+previous evidence.
+
+If the repository secret `AREN_AGENT_PAT` exists (a fine-grained PAT with
+`contents: write`), `agent-exec` pushes with it and `pull_request` runs schedule
+normally. That makes the badge trustworthy again, but does not change the rule:
+match the SHA.

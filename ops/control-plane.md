@@ -16,14 +16,19 @@ syncs from fighting over these files.
 API — it can read files, write comments and move refs, but it cannot run
 `cargo`, `just`, a formatter or a test. That is permanent and is not a blocker.
 
-Code therefore changes through exactly one route:
+Code therefore changes through exactly one route, and CI is reached through
+exactly one more:
 
-> The worker posts an `/agent-exec` comment on the issue labelled `agent:exec`.
-> `.github/workflows/agent-exec.yml` applies that declarative edit on a runner,
-> formats it, runs clippy and the scoped tests, pushes the result and reports
-> the real compiler and test output back as a comment.
+> **Editing.** The worker posts an `/agent-exec` comment on the issue labelled
+> `agent:exec`. `.github/workflows/agent-exec.yml` applies that declarative
+> edit on a runner, formats it, runs clippy and the scoped tests, pushes the
+> result and reports the real compiler and test output back as a comment.
+>
+> **CI evidence.** The worker posts `/agent-ci <branch>` on the same issue.
+> `.github/workflows/agent-ci.yml` dispatches the blocking lane at that
+> branch's head, so real check runs land on the exact commit under review.
 
-See [`ops/agent-exec.md`](agent-exec.md) for the payload format.
+See [`ops/agent-exec.md`](agent-exec.md) for both payload formats.
 
 Consequences, all binding:
 
@@ -31,9 +36,10 @@ Consequences, all binding:
   back whole. Edit through `agent-exec` with fail-closed pattern assertions.
 - Never open a temporary workflow to get work done. `agent-exec` is permanent,
   reviewed and already has the toolchain.
-- "I have no way to edit files" is **not** a blocker and must never be
-  escalated again. If `agent-exec` itself is broken, that is a concrete,
-  reportable defect: name the run URL and the failing step.
+- "I have no way to edit files" and "my pushes produce no CI" are **not**
+  blockers and must never be escalated again. If `agent-exec` or `agent-ci`
+  itself is broken, that is a concrete, reportable defect: name the run URL
+  and the failing step.
 
 ## 1. CONTROL discovery
 
@@ -51,19 +57,19 @@ live GitHub disagree, live GitHub wins and the state block gets corrected.
 
 ```yaml
 # ARENSTATE v2
-updated_at: 2026-09-26T08:00:00+02:00
+updated_at: 2026-10-17T12:00:00+02:00
 updated_by: PLAN
-main: 9f7ea7f323c04fbbfe8ec0680e4fd6f2e15203c7
+main: 17b119280cd5acc1247908e105b144c533c1e45b
 merge_lane: FREE          # FREE | HELD:<pr-number>
 blockers: []              # see §5; an empty list means "work, do not ask"
 queue:
-  - id: Q3c
-    issue: 28
-    work_order: ops/work-orders/WO-Q3C.md
+  - id: R1
+    issue: 94
+    work_order: ops/work-orders/WO-94.md
     owner: CHAT1
-    status: READY
-    branch: feature/queue-existing-session-cli
-    pr: null
+    status: IN_PROGRESS
+    branch: chat1/94-autonomous-train-controller
+    pr: 96
 ```
 
 Reading the state block is the whole of state reconstruction. A worker that
@@ -138,10 +144,18 @@ Any change to the head invalidates all of it. After merging, the item is
 `MERGED_PENDING_MAIN_CI`; it becomes `DONE` only once the resulting `main` run
 of `aren-ci` is fully green. Never start the next item on a red `main`.
 
-Note on freshness: `agent-exec` pushes with `AREN_AGENT_PAT` when that secret
-exists, which re-triggers pull-request CI. Without it, a push lands but the
-pull request keeps its previous checks — in that case the displayed checks are
-stale evidence and must not be used to satisfy gate 1.
+Note on gate 1. The worker's pushes do not schedule `pull_request` runs, so the
+checks a pull request displays can lag its head by several commits. Stale
+checks never satisfy gate 1. What does:
+
+- an `aren-ci` run whose head SHA equals the head being merged, from either a
+  `pull_request` or a `workflow_dispatch` event — `/agent-ci <branch>` produces
+  the latter;
+- with every blocking job `completed` and `success`.
+
+Check the SHA, not the pull request's badge. If the secret `AREN_AGENT_PAT`
+exists, `agent-exec` pushes with it and `pull_request` runs schedule normally,
+which makes the badge trustworthy again — but the SHA check is still the rule.
 
 ## 5. Blockers
 

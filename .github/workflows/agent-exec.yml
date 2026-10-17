@@ -152,7 +152,7 @@ jobs:
           set -euo pipefail
           # These are owner gates in `ops/control-plane.md`. The worker may not
           # relax them to make its own run go green.
-          protected='^(codex-rs/deny\.toml|\.github/workflows/(agent-exec|blocking-ci|cargo-deny|blob-size-policy)\.yml)$'
+          protected='^(codex-rs/deny\.toml|\.github/workflows/(agent-exec|agent-ci|blocking-ci|cargo-deny|blob-size-policy)\.yml)$'
           offending="$(git status --porcelain=v1 | awk '{print $NF}' | grep -E "${protected}" || true)"
           if [[ -n "${offending}" ]]; then
             echo "::error::payload touches owner-gated policy files:"
