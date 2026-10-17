@@ -131,6 +131,71 @@ def reviews_result(api: GitHub, number: int) -> bool | None:
     return "CHANGES_REQUESTED" not in latest.values()
 
 
+def review_threads_result(api: GitHub, number: int) -> bool | None:
+    owner, name = api.repo.split("/", 1)
+    data = api.graphql(
+        """query($owner:String!, $name:String!, $number:Int!) {
+          repository(owner:$owner, name:$name) {
+            pullRequest(number:$number) {
+              reviewThreads(first:100) {
+                nodes { isResolved }
+                pageInfo { hasNextPage }
+              }
+            }
+          }
+        }""",
+        {"owner": owner, "name": name, "number": number},
+    )
+    threads = (((data.get("repository") or {}).get("pullRequest") or {})
+               .get("reviewThreads") or {})
+    if threads.get("pageInfo", {}).get("hasNextPage"):
+        return None
+    nodes = threads.get("nodes")
+    if nodes is None:
+        return None
+    return all(node.get("isResolved") is True for node in nodes)
+
+
+def external_ci_result(api: GitHub, issue_number: int, issue_body: str, head: str) -> str:
+    if "<!-- aren:external-ci:required -->" not in issue_body:
+        return "not_required"
+    comments = api.request("GET", f"issues/{issue_number}/comments?per_page=100")
+    if not isinstance(comments, list) or len(comments) >= 100:
+        return "pending"
+    ok = f"<!-- aren:external-ci:success head={head} -->"
+    failed = f"<!-- aren:external-ci:failure head={head} -->"
+    bodies = [comment.get("body") or "" for comment in comments]
+    if any(failed in body for body in bodies):
+        return "failure"
+    if any(ok in body for body in bodies):
+        return "success"
+    return "pending"
+
+
+def main_ci_result(api: GitHub, sha: str) -> str | None:
+    query = urllib.parse.urlencode({"head_sha": sha, "event": "push", "per_page": 30})
+    data = api.request("GET", f"actions/workflows/blocking-ci.yml/runs?{query}")
+    runs = [r for r in (data or {}).get("workflow_runs", [])
+            if r.get("head_sha") == sha and r.get("head_branch") == "main"
+            and r.get("event") == "push"]
+    if not runs:
+        return None
+    newest = max(runs, key=lambda r: (r.get("run_number", 0), r.get("run_attempt", 0)))
+    if newest.get("status") != "completed":
+        return "pending"
+    if newest.get("conclusion") != "success":
+        return "failure"
+    checks = api.request("GET", f"commits/{sha}/check-runs?per_page=100")
+    found = {check.get("name"): check for check in (checks or {}).get("check_runs", [])
+             if check.get("name") in REQUIRED_CHECKS}
+    if set(found) != REQUIRED_CHECKS:
+        return None
+    if any(check.get("status") != "completed" or check.get("conclusion") != "success"
+           for check in found.values()):
+        return "failure"
+    return "success"
+
+
 def build_snapshot(api: GitHub) -> tuple[int, Snapshot]:
     control = open_active_control(api)
     number = authorized_issue(control.get("body") or "")
@@ -154,19 +219,37 @@ def build_snapshot(api: GitHub) -> tuple[int, Snapshot]:
     if not head or not branch:
         raise GateError("Linked PR has no exact head")
     if detail.get("merged"):
-        # The exact resulting-main SHA must still be verified separately.
-        return number, dataclasses.replace(snapshot, has_pr=True, merged=True,
-                                            head_sha=head, resulting_main_sha=detail.get("merge_commit_sha"))
+        resulting = detail.get("merge_commit_sha")
+        return number, dataclasses.replace(
+            snapshot,
+            has_pr=True,
+            merged=True,
+            head_sha=head,
+            resulting_main_sha=resulting,
+            resulting_main_ci=main_ci_result(api, resulting) if resulting == main_sha else None,
+        )
 
     comparison = api.request("GET", f"compare/{urllib.parse.quote(main_sha)}...{urllib.parse.quote(head)}")
     merge_base = (comparison or {}).get("merge_base_commit", {}).get("sha")
     ci = check_result(api, head, branch)
     reviews = reviews_result(api, detail["number"])
-    # Inline review-thread resolution, external Jenkins, scope and preservation
-    # must be independently proven before merge. Never infer from empty comments.
+    threads = review_threads_result(api, detail["number"])
+    pr_body = detail.get("body") or ""
+    scope_accepted = "<!-- aren:scope-accepted -->" in pr_body
+    preservation_verified = "<!-- aren:preservation-verified -->" in pr_body
+    external_ci = external_ci_result(api, number, issue.get("body") or "", head)
     return number, dataclasses.replace(
-        snapshot, has_pr=True, head_sha=head, base_sha=merge_base,
-        head_ci=ci, reviews_clean=reviews, mergeable=detail.get("mergeable"),
+        snapshot,
+        has_pr=True,
+        head_sha=head,
+        base_sha=merge_base,
+        head_ci=ci,
+        reviews_clean=reviews,
+        threads_clean=threads,
+        mergeable=detail.get("mergeable"),
+        scope_accepted=scope_accepted,
+        preservation_verified=preservation_verified,
+        external_ci=external_ci,
     )
 
 
