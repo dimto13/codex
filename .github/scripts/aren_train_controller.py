@@ -6,8 +6,6 @@ that are fully qualified by live GitHub evidence. Work that still needs code or
 review changes is escalated back into CONTROL with an exact, de-duplicated action
 instead of silently idling.
 """
-from __future__ import annotations
-
 import dataclasses
 import json
 import os
