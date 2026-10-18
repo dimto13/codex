@@ -4,8 +4,6 @@
 The caller must obtain the snapshot from live GitHub CONTROL/PR/check/review data.
 This module never treats chat state, stale CI, or absent evidence as success.
 """
-from __future__ import annotations
-
 import dataclasses
 import enum
 import json
