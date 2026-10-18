@@ -4,8 +4,6 @@
 GITHUB_TOKEN tag pushes do not trigger downstream push workflows. Dispatch the
 canonical release workflow explicitly at the tag ref after creating the tag.
 """
-from __future__ import annotations
-
 import json
 import os
 import re
