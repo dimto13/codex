@@ -4,6 +4,7 @@ from aren_release_tag import GateError
 from aren_train_live import (
     authorized_issue,
     build_snapshot,
+    external_ci_result,
     linked_pr,
     open_active_control,
     train_contract,
@@ -42,6 +43,7 @@ class FakeAPI:
         self.controls = [{"number": 81}]
         self.issue = {"number": 94, "state": "open", "body": ISSUE_BODY}
         self.prs = []
+        self.comments = []
 
     def request(self, method, path, payload=None):
         assert method == "GET"
@@ -55,6 +57,8 @@ class FakeAPI:
             return {"commit": {"sha": SHA}}
         if path.startswith("pulls?"):
             return self.prs if page_number(path) == 1 else []
+        if path.startswith("issues/94/comments"):
+            return self.comments if page_number(path) == 1 else []
         raise AssertionError(path)
 
 
@@ -128,6 +132,18 @@ class LiveTrainTests(unittest.TestCase):
         ]
         with self.assertRaisesRegex(GateError, "Multiple canonical PR"):
             linked_pr(self.api, 94)
+
+    def test_external_ci_requires_exact_head_marker(self):
+        head = "b" * 40
+        self.api.comments = [
+            {"body": "Jenkins SUCCESS"},
+            {"body": f"<!-- aren:external-ci:success head={'c' * 40} -->"},
+        ]
+        self.assertEqual(external_ci_result(self.api, 94, True, head), "pending")
+        self.api.comments.append(
+            {"body": f"<!-- aren:external-ci:success head={head} -->"}
+        )
+        self.assertEqual(external_ci_result(self.api, 94, True, head), "success")
 
     def test_unlinked_supplementary_pr_does_not_authorize_merge(self):
         self.api.prs = [{"number": 99, "body": "Related bootstrap for #94 / PR #96."}]
