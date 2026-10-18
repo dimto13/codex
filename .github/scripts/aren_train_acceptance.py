@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 """Verify owner-visible acceptance for a merged autonomous Aren train."""
-from __future__ import annotations
-
 import os
 import re
 import sys
