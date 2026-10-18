@@ -2,8 +2,14 @@ import unittest
 from unittest.mock import patch
 
 from aren_release_tag import GateError
-from aren_train_controller import execute
+from aren_train_controller import execute, issue_comments
 from aren_train_state import Snapshot
+
+
+def page_number(path):
+    if "page=" not in path:
+        return 1
+    return int(path.rsplit("page=", 1)[1].split("&", 1)[0])
 
 
 class FakeAPI:
@@ -16,12 +22,20 @@ class FakeAPI:
 
     def request(self, method, path, payload=None):
         if method == "GET" and path.startswith("issues/81/comments"):
-            return self.comments
+            page = page_number(path)
+            start = (page - 1) * 100
+            return self.comments[start:start + 100]
         if method == "GET" and path == "issues/94":
             return {"number": 94, "state": "open", "body": "body"}
         if method == "GET" and path.startswith("actions/workflows/blocking-ci.yml/runs"):
             return {"workflow_runs": self.workflow_runs}
         if method == "POST" and path == "actions/workflows/blocking-ci.yml/dispatches":
+            self.writes.append((method, path, payload))
+            return None
+        if method == "POST" and path == "actions/workflows/aren-train-worker.yml/dispatches":
+            self.writes.append((method, path, payload))
+            return None
+        if method == "POST" and path == "actions/workflows/aren-train-acceptance.yml/dispatches":
             self.writes.append((method, path, payload))
             return None
         if method == "POST" and path == "issues/81/comments":
@@ -60,6 +74,10 @@ class ControllerTests(unittest.TestCase):
              patch("aren_train_controller.current_pr", return_value=pr):
             return execute(self.api)
 
+    def test_issue_comment_pagination_handles_more_than_one_page(self):
+        self.api.comments = [{"body": f"comment {index}"} for index in range(101)]
+        self.assertEqual(len(issue_comments(self.api, 81)), 101)
+
     def test_missing_head_ci_is_dispatched_instead_of_idling(self):
         snapshot = Snapshot(
             control_count=1, authorized=True, has_pr=True,
@@ -74,7 +92,7 @@ class ControllerTests(unittest.TestCase):
               {"ref": "chat1/94-autonomous-train-controller"})],
         )
 
-    def test_actionable_code_state_escalates_once(self):
+    def test_actionable_code_state_dispatches_real_worker_once(self):
         snapshot = Snapshot(
             control_count=1, authorized=True, has_pr=True,
             head_sha="a" * 40, base_sha="b" * 40, main_sha="b" * 40,
@@ -82,15 +100,52 @@ class ControllerTests(unittest.TestCase):
         )
         first = self.run_execute(snapshot)
         second = self.run_execute(snapshot)
-        self.assertEqual(first["outcome"], "escalated")
-        self.assertEqual(second["outcome"], "already_escalated")
+        self.assertEqual(first["outcome"], "worker_dispatched")
+        self.assertEqual(second["outcome"], "worker_already_dispatched")
+        dispatches = [
+            write for write in self.api.writes
+            if write[1] == "actions/workflows/aren-train-worker.yml/dispatches"
+        ]
+        self.assertEqual(len(dispatches), 1)
+        self.assertEqual(dispatches[0][2]["inputs"]["head"], "a" * 40)
         self.assertEqual(len(self.api.comments), 1)
+
+    def test_missing_resulting_main_ci_is_actively_dispatched(self):
+        snapshot = Snapshot(
+            control_count=1, authorized=True, has_pr=True, merged=True,
+            head_sha="a" * 40, main_sha="c" * 40,
+            resulting_main_sha="c" * 40, resulting_main_ci=None,
+        )
+        result = self.run_execute(snapshot, pr=None)
+        self.assertEqual(result["outcome"], "main_ci_dispatched")
+        self.assertIn(
+            ("POST", "actions/workflows/blocking-ci.yml/dispatches", {"ref": "main"}),
+            self.api.writes,
+        )
+
+    def test_acceptance_state_dispatches_verifier(self):
+        snapshot = Snapshot(
+            control_count=1, authorized=True, has_pr=True, merged=True,
+            head_sha="a" * 40, main_sha="c" * 40,
+            resulting_main_sha="c" * 40, resulting_main_ci="success",
+            acceptance_required=True, acceptance_verified=False,
+        )
+        result = self.run_execute(snapshot, pr=None)
+        self.assertEqual(result["outcome"], "acceptance_dispatched")
+        self.assertIn(
+            (
+                "POST",
+                "actions/workflows/aren-train-acceptance.yml/dispatches",
+                {"ref": "main", "inputs": {"issue": "94", "main_sha": "c" * 40}},
+            ),
+            self.api.writes,
+        )
 
     def test_fully_qualified_lane_marks_ready_and_merges_exact_head(self):
         snapshot = Snapshot(
             control_count=1, authorized=True, has_pr=True,
             head_sha="a" * 40, base_sha="b" * 40, main_sha="b" * 40,
-            head_ci="success", external_ci="not_required",
+            head_ci="success", external_ci="success",
             reviews_clean=True, threads_clean=True, mergeable=True,
             scope_accepted=True, preservation_verified=True,
         )
@@ -100,16 +155,16 @@ class ControllerTests(unittest.TestCase):
         merge = [write for write in self.api.writes if write[1] == "pulls/96/merge"]
         self.assertEqual(merge[0][2]["sha"], "a" * 40)
 
-    def test_done_closes_issue_and_records_control_evidence(self):
+    def test_done_closes_issue_only_after_applicable_acceptance(self):
         snapshot = Snapshot(
             control_count=1, authorized=True, has_pr=True, merged=True,
             head_sha="a" * 40, main_sha="c" * 40,
             resulting_main_sha="c" * 40, resulting_main_ci="success",
+            acceptance_required=True, acceptance_verified=True,
         )
         result = self.run_execute(snapshot, pr=None)
         self.assertEqual(result["outcome"], "issue_closed")
         self.assertIn(("PATCH", "issues/94", {"state": "closed"}), self.api.writes)
-        self.assertEqual(len(self.api.comments), 1)
 
     def test_release_without_explicit_tag_marker_fails_closed(self):
         snapshot = Snapshot(
