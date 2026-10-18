@@ -1,0 +1,41 @@
+name: aren-train-acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue:
+        required: true
+        type: string
+      main_sha:
+        required: true
+        type: string
+
+concurrency:
+  group: aren-train-acceptance-${{ inputs.issue }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+  actions: read
+  checks: read
+
+jobs:
+  verify:
+    name: Verify resulting-main autonomous acceptance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.main_sha }}
+          persist-credentials: false
+      - name: Verify exact checkout
+        env:
+          MAIN_SHA: ${{ inputs.main_sha }}
+        run: test "$(git rev-parse HEAD)" = "$MAIN_SHA"
+      - name: Verify live train acceptance
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/aren_train_acceptance.py "${{ inputs.issue }}" "${{ inputs.main_sha }}"
