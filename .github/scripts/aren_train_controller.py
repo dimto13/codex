@@ -123,6 +123,14 @@ def dispatch_acceptance(api: GitHub, issue_number: int, main_sha: str) -> str:
     return "acceptance_dispatched"
 
 
+def worker_success_exists(api: GitHub, issue_number: int) -> bool:
+    marker = f"aren:worker:success issue={issue_number} "
+    return any(
+        marker in (comment.get("body") or "")
+        for comment in paginated_list(api, f"issues/{issue_number}/comments")
+    )
+
+
 def mark_ready(api: GitHub, pr: dict) -> None:
     if not pr.get("draft"):
         return
