@@ -45,7 +45,7 @@ jobs:
         run: |
           set -euo pipefail
           case "$ACTION" in
-            implement_or_open_pr|refresh_pr_evidence|rebase|fix_ci|fix_review_findings|inspect_reviews|verify_merge_gates|repair_main_ci|repair_or_poll_release) ;;
+            implement_or_open_pr|refresh_pr_evidence|rebase|fix_ci|fix_review_findings|inspect_reviews|verify_merge_gates|repair_main_ci|repair_or_poll_release|acceptance_probe) ;;
             *) echo "unsupported worker action: $ACTION" >&2; exit 2 ;;
           esac
           if [[ -n "$HEAD" && ! "$HEAD" =~ ^[0-9a-f]{40}$ ]]; then
@@ -118,7 +118,7 @@ jobs:
         uses: openai/codex-action@bdf19a4a223ec2549a3e2274a0cf61556bc07675
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-          permission-profile: ":workspace"
+          permission-profile: ${{ inputs.action == 'acceptance_probe' && ':read-only' || ':workspace' }}
           prompt-file: ${{ env.AREN_WORKER_PROMPT }}
           allow-bots: "true"
           allow-bot-users: "github-actions"
@@ -132,6 +132,13 @@ jobs:
         run: |
           set -euo pipefail
           git diff --check
+          if [[ "$ACTION" == "acceptance_probe" ]]; then
+            if ! git diff --quiet || ! git diff --cached --quiet; then
+              echo "Read-only acceptance probe modified the worktree" >&2
+              exit 2
+            fi
+            exit 0
+          fi
           if git diff --quiet && git diff --cached --quiet; then
             echo "No worktree changes produced."
             exit 0
