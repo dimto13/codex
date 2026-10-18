@@ -16,17 +16,14 @@ import sys
 import urllib.parse
 
 from aren_release_tag import GateError, GitHub, ensure_tag_and_release
-from aren_train_live import build_snapshot, linked_pr, open_active_control
+from aren_train_live import build_snapshot, linked_pr, open_active_control, paginated_list
 from aren_train_state import State, decide
 
 WATCH_MARKER = "<!-- aren-train-watchdog issue={issue} action={action} head={head} -->"
 
 
 def issue_comments(api: GitHub, number: int) -> list[dict]:
-    comments = api.request("GET", f"issues/{number}/comments?per_page=100")
-    if not isinstance(comments, list) or len(comments) >= 100:
-        raise GateError("Issue comment discovery incomplete")
-    return comments
+    return paginated_list(api, f"issues/{number}/comments")
 
 
 def comment_once(api: GitHub, number: int, marker: str, body: str) -> bool:
@@ -63,6 +60,66 @@ def ensure_head_ci_started(api: GitHub, pr: dict) -> str:
         return "ci_already_started"
     api.request("POST", "actions/workflows/blocking-ci.yml/dispatches", {"ref": branch})
     return "ci_dispatched"
+
+
+WORKER_ACTIONS = frozenset({
+    "implement_or_open_pr",
+    "refresh_pr_evidence",
+    "rebase",
+    "fix_ci",
+    "fix_review_findings",
+    "inspect_reviews",
+    "verify_merge_gates",
+    "repair_main_ci",
+    "repair_or_poll_release",
+})
+
+
+def dispatch_worker(api: GitHub, issue_number: int, pr: dict | None,
+                    action: str, reason: str) -> str:
+    if action not in WORKER_ACTIONS:
+        raise GateError(f"Action {action} is not worker-dispatchable")
+    head = ((pr or {}).get("head") or {}).get("sha") or ""
+    branch = ((pr or {}).get("head") or {}).get("ref") or ""
+    payload = {
+        "ref": "main",
+        "inputs": {
+            "issue": str(issue_number),
+            "pr": str((pr or {}).get("number") or ""),
+            "branch": branch,
+            "head": head,
+            "action": action,
+            "reason": reason[:500],
+        },
+    }
+    api.request("POST", "actions/workflows/aren-train-worker.yml/dispatches", payload)
+    return "worker_dispatched"
+
+
+def ensure_main_ci_started(api: GitHub, sha: str) -> str:
+    query = urllib.parse.urlencode({"head_sha": sha, "event": "push", "per_page": 100})
+    runs = api.request("GET", f"actions/workflows/blocking-ci.yml/runs?{query}")
+    matching = [
+        run for run in (runs or {}).get("workflow_runs", [])
+        if run.get("head_sha") == sha
+        and run.get("head_branch") == "main"
+        and run.get("event") == "push"
+    ]
+    if matching:
+        return "main_ci_already_started"
+    api.request("POST", "actions/workflows/blocking-ci.yml/dispatches", {"ref": "main"})
+    return "main_ci_dispatched"
+
+
+def dispatch_acceptance(api: GitHub, issue_number: int, main_sha: str) -> str:
+    if not main_sha:
+        raise GateError("Acceptance requires exact resulting-main SHA")
+    api.request(
+        "POST",
+        "actions/workflows/aren-train-acceptance.yml/dispatches",
+        {"ref": "main", "inputs": {"issue": str(issue_number), "main_sha": main_sha}},
+    )
+    return "acceptance_dispatched"
 
 
 def mark_ready(api: GitHub, pr: dict) -> None:
@@ -171,9 +228,31 @@ def execute(api: GitHub) -> dict:
         return {"issue": issue_number, "state": decision.state.value,
                 "action": decision.action, "outcome": "issue_closed"}
 
-    if decision.action in ("poll_main_ci",):
+    if decision.action == "poll_main_ci":
+        outcome = ensure_main_ci_started(api, snapshot.main_sha or "")
         return {"issue": issue_number, "state": decision.state.value,
-                "action": decision.action, "outcome": "waiting_for_existing_main_ci"}
+                "action": decision.action, "outcome": outcome}
+
+    if decision.action == "run_acceptance":
+        outcome = dispatch_acceptance(api, issue_number, snapshot.main_sha or "")
+        return {"issue": issue_number, "state": decision.state.value,
+                "action": decision.action, "outcome": outcome}
+
+    if decision.action in WORKER_ACTIONS:
+        outcome = dispatch_worker(api, issue_number, pr, decision.action, decision.reason)
+        marker = WATCH_MARKER.format(issue=issue_number, action=decision.action, head=head or "none")
+        comment_once(
+            api,
+            control_number,
+            marker,
+            f"## ACTIONABLE TRAIN STATE DISPATCHED — #{issue_number}\n\n"
+            f"- action: `{decision.action}`\n"
+            f"- exact head: `{head or 'none'}`\n"
+            "- executor: `aren-train-worker.yml`\n"
+            f"- reason: {decision.reason}",
+        )
+        return {"issue": issue_number, "state": decision.state.value,
+                "action": decision.action, "outcome": outcome}
 
     outcome = escalate(api, control_number, issue_number, decision.action, head, decision.reason)
     return {"issue": issue_number, "state": decision.state.value,
