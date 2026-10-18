@@ -239,8 +239,11 @@ def execute(api: GitHub) -> dict:
                 "action": decision.action, "outcome": outcome}
 
     if decision.action in WORKER_ACTIONS:
-        outcome = dispatch_worker(api, issue_number, pr, decision.action, decision.reason)
         marker = WATCH_MARKER.format(issue=issue_number, action=decision.action, head=head or "none")
+        if any(marker in (comment.get("body") or "") for comment in issue_comments(api, control_number)):
+            return {"issue": issue_number, "state": decision.state.value,
+                    "action": decision.action, "outcome": "worker_already_dispatched"}
+        outcome = dispatch_worker(api, issue_number, pr, decision.action, decision.reason)
         comment_once(
             api,
             control_number,
