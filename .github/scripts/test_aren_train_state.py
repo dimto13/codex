@@ -26,6 +26,10 @@ class TrainStateTests(unittest.TestCase):
         self.check(State.ACTIVE_IMPLEMENTATION, external_ci=None)
         self.check(State.ACTIVE_IMPLEMENTATION, base_sha="c" * 40)
 
+    def test_external_ci_never_replaces_missing_blocking_ci(self):
+        self.check(State.ACTIVE_IMPLEMENTATION, head_ci=None, external_ci="success")
+        self.check(State.CI_FIX_LOOP, head_ci="failure", external_ci="success")
+
     def test_control_and_owner_gates(self):
         self.check(State.HARD_BLOCKED, control_count=0)
         self.check(State.HARD_BLOCKED, control_count=2)
