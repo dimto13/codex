@@ -72,6 +72,7 @@ WORKER_ACTIONS = frozenset({
     "verify_merge_gates",
     "repair_main_ci",
     "repair_or_poll_release",
+    "acceptance_probe",
 })
 
 
