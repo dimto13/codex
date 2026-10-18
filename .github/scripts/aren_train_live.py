@@ -4,8 +4,6 @@
 This module is deliberately read-only. Unknown evidence never becomes a green
 gate. A separate executor must own mutations after the decision is qualified.
 """
-from __future__ import annotations
-
 import dataclasses
 import json
 import os
