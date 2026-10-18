@@ -1,3 +1,35 @@
+# Repository orchestration invariants
+
+These rules apply to repository-level autonomous work in addition to the engineering rules below.
+
+## Parallel work and work stealing
+
+- GitHub is the operational source of truth. Workers must reconstruct active work, ownership, dependencies, branches, PRs, CI and merge state from GitHub rather than chat memory.
+- The active CONTROL issue defines the allowed concurrency. When CONTROL authorizes multiple worker slots, independent dependency-ready items may be implemented in parallel.
+- A worker owns exactly one claimed implementation item at a time. Ownership must be visible through the issue, branch or PR so another worker can avoid duplicate work.
+- If a worker is waiting on CI, review, or other external evidence and CONTROL exposes another dependency-ready unclaimed item, the idle worker should work-steal that item instead of remaining idle.
+- Never start work whose hard technical dependency is not satisfied, and never duplicate work already visible on another branch or PR.
+
+## Early visibility and fast local gates
+
+- Open a draft PR after the first meaningful compile-clean commit. Do not keep substantial multi-commit feature work hidden on a branch until the implementation is complete.
+- Before pushing a candidate head, run the repo-standard fast hygiene applicable to the changed crates:
+  - run `just fmt` in `codex-rs`;
+  - run scoped `just fix -p <project>` when applicable;
+  - run targeted `just test -p <project>`;
+  - run required schema/snapshot/lock generators when the change requires them.
+- Deterministic format, lint, generated-file or similarly local failures are worker-owned. Fix them immediately and rerun; do not hand them to PLAN as blockers.
+- CI should validate a candidate, not be used as the first formatter or linter.
+
+## Mandatory pre-merge rebase
+
+- Every implementation branch must be rebased onto the latest exact green `main` immediately before final merge qualification.
+- A branch that is behind `main` is not merge-ready, even if older CI on that head was green.
+- Any rebase or other head change invalidates previous exact-head CI/review evidence. Refresh all required checks after the rebase.
+- Parallel implementation does not imply parallel merging: the global merge lane remains serialized unless CONTROL explicitly says otherwise.
+- After one PR merges and resulting-main CI is green, every other pending parallel branch must rebase onto that new green `main` before its own final merge qualification.
+- Workers do not self-merge unless the active CONTROL explicitly authorizes it. Otherwise hand off `READY_FOR_PLAN_MERGE`.
+
 # Rust/codex-rs
 
 In the codex-rs folder where the rust code lives:
