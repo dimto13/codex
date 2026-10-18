@@ -21,7 +21,7 @@ class FakeAPI:
         self.graphql_writes = []
 
     def request(self, method, path, payload=None):
-        if method == "GET" and path.startswith("issues/81/comments"):
+        if method == "GET" and (path.startswith("issues/81/comments") or path.startswith("issues/94/comments")):
             page = page_number(path)
             start = (page - 1) * 100
             return self.comments[start:start + 100]
