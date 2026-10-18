@@ -1,0 +1,170 @@
+name: aren-train-worker
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue:
+        required: true
+        type: string
+      pr:
+        required: false
+        type: string
+      branch:
+        required: false
+        type: string
+      head:
+        required: false
+        type: string
+      action:
+        required: true
+        type: string
+      reason:
+        required: true
+        type: string
+
+concurrency:
+  group: aren-train-worker-${{ inputs.issue }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  execute:
+    name: Consume actionable train work
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Validate bounded action
+        env:
+          ACTION: ${{ inputs.action }}
+          BRANCH: ${{ inputs.branch }}
+          HEAD: ${{ inputs.head }}
+        run: |
+          set -euo pipefail
+          case "$ACTION" in
+            implement_or_open_pr|refresh_pr_evidence|rebase|fix_ci|fix_review_findings|inspect_reviews|verify_merge_gates|repair_main_ci|repair_or_poll_release|acceptance_probe) ;;
+            *) echo "unsupported worker action: $ACTION" >&2; exit 2 ;;
+          esac
+          if [[ -n "$HEAD" && ! "$HEAD" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "invalid exact head" >&2
+            exit 2
+          fi
+          if [[ -n "$BRANCH" && ! "$BRANCH" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+            echo "invalid branch" >&2
+            exit 2
+          fi
+
+      - name: Require coding-agent credential
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [[ -z "$OPENAI_API_KEY" ]]; then
+            echo "HARD_OWNER_GATE: OPENAI_API_KEY repository secret is unavailable" >&2
+            exit 2
+          fi
+
+      - name: Checkout exact work head
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.head || inputs.branch || 'main' }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Verify branch lease
+        if: ${{ inputs.branch != '' && inputs.head != '' }}
+        env:
+          BRANCH: ${{ inputs.branch }}
+          HEAD: ${{ inputs.head }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          live="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${BRANCH}" --jq .object.sha)"
+          test "$live" = "$HEAD"
+          test "$(git rev-parse HEAD)" = "$HEAD"
+
+      - name: Build trusted worker prompt
+        env:
+          ISSUE: ${{ inputs.issue }}
+          PR: ${{ inputs.pr }}
+          ACTION: ${{ inputs.action }}
+          REASON: ${{ inputs.reason }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          prompt="$RUNNER_TEMP/aren-worker-prompt.md"
+          {
+            echo "You are the designated Aren implementation worker for issue #$ISSUE."
+            echo "Execute exactly this controller action: $ACTION"
+            echo "Reason: $REASON"
+            echo
+            echo "Read and obey AGENTS.md. Stay within the authorized issue/PR scope."
+            echo "Inspect failures/reviews, make the smallest correct fix, run repo-required focused checks, and leave the working tree with only intended changes."
+            echo "Do not weaken CI/security/review/preservation gates. Do not merge, tag, release, modify CONTROL authority, commit, or push."
+            echo
+            echo "## Issue"
+            gh api "repos/${GITHUB_REPOSITORY}/issues/$ISSUE" --jq '.body // ""'
+            if [[ -n "$PR" ]]; then
+              echo
+              echo "## Pull request"
+              gh api "repos/${GITHUB_REPOSITORY}/pulls/$PR" --jq '.body // ""'
+            fi
+          } > "$prompt"
+          echo "AREN_WORKER_PROMPT=$prompt" >> "$GITHUB_ENV"
+
+      - name: Run Codex worker
+        uses: openai/codex-action@bdf19a4a223ec2549a3e2274a0cf61556bc07675
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          permission-profile: ${{ inputs.action == 'acceptance_probe' && ':read-only' || ':workspace' }}
+          prompt-file: ${{ env.AREN_WORKER_PROMPT }}
+          allow-bots: "true"
+          allow-bot-users: "github-actions"
+
+      - name: Validate and publish worker changes
+        env:
+          ISSUE: ${{ inputs.issue }}
+          ACTION: ${{ inputs.action }}
+          BRANCH: ${{ inputs.branch }}
+          HEAD: ${{ inputs.head }}
+        run: |
+          set -euo pipefail
+          git diff --check
+          if [[ "$(git rev-parse HEAD)" != "$HEAD" ]]; then
+            echo "Worker changed local commit history; only worktree edits are permitted" >&2
+            exit 2
+          fi
+          if [[ "$ACTION" == "acceptance_probe" ]]; then
+            if [[ -n "$(git status --porcelain)" ]]; then
+              echo "Read-only acceptance probe modified the worktree" >&2
+              exit 2
+            fi
+            exit 0
+          fi
+          if [[ -z "$(git status --porcelain)" ]]; then
+            echo "No worktree changes produced."
+            exit 0
+          fi
+          if [[ -z "$BRANCH" || -z "$HEAD" ]]; then
+            echo "Worker produced changes without an exact target branch lease" >&2
+            exit 2
+          fi
+          git config user.name "aren-train-worker[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix(train): automated $ACTION for #$ISSUE"
+          git push --force-with-lease="refs/heads/$BRANCH:$HEAD" origin "HEAD:refs/heads/$BRANCH"
+
+      - name: Record worker consumption evidence
+        if: ${{ success() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ inputs.issue }}
+          ACTION: ${{ inputs.action }}
+          HEAD: ${{ inputs.head }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          body="<!-- aren:worker:success issue=$ISSUE head=$HEAD action=$ACTION run=$RUN_ID -->"$'\n\n'"Worker workflow consumed the actionable train state successfully. Run: $RUN_ID"
+          gh api "repos/${GITHUB_REPOSITORY}/issues/$ISSUE/comments" -f body="$body"
