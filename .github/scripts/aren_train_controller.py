@@ -243,6 +243,20 @@ def execute(api: GitHub) -> dict:
                 "action": decision.action, "outcome": outcome}
 
     if decision.action == "run_acceptance":
+        if not worker_success_exists(api, issue_number):
+            probe_pr = {
+                "number": (pr or {}).get("number"),
+                "head": {"sha": snapshot.main_sha or "", "ref": "main"},
+            }
+            outcome = dispatch_worker(
+                api,
+                issue_number,
+                probe_pr,
+                "acceptance_probe",
+                "Verify that the configured implementation worker can consume an actionable train state.",
+            )
+            return {"issue": issue_number, "state": decision.state.value,
+                    "action": "acceptance_probe", "outcome": outcome}
         outcome = dispatch_acceptance(api, issue_number, snapshot.main_sha or "")
         return {"issue": issue_number, "state": decision.state.value,
                 "action": decision.action, "outcome": outcome}
