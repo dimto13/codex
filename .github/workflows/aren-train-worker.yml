@@ -102,7 +102,7 @@ jobs:
             echo
             echo "Read and obey AGENTS.md. Stay within the authorized issue/PR scope."
             echo "Inspect failures/reviews, make the smallest correct fix, run repo-required focused checks, and leave the working tree with only intended changes."
-            echo "Do not weaken CI/security/review/preservation gates. Do not merge, tag, release, or modify CONTROL authority."
+            echo "Do not weaken CI/security/review/preservation gates. Do not merge, tag, release, modify CONTROL authority, commit, or push."
             echo
             echo "## Issue"
             gh api "repos/${GITHUB_REPOSITORY}/issues/$ISSUE" --jq '.body // ""'
@@ -132,14 +132,18 @@ jobs:
         run: |
           set -euo pipefail
           git diff --check
+          if [[ "$(git rev-parse HEAD)" != "$HEAD" ]]; then
+            echo "Worker changed local commit history; only worktree edits are permitted" >&2
+            exit 2
+          fi
           if [[ "$ACTION" == "acceptance_probe" ]]; then
-            if ! git diff --quiet || ! git diff --cached --quiet; then
+            if [[ -n "$(git status --porcelain)" ]]; then
               echo "Read-only acceptance probe modified the worktree" >&2
               exit 2
             fi
             exit 0
           fi
-          if git diff --quiet && git diff --cached --quiet; then
+          if [[ -z "$(git status --porcelain)" ]]; then
             echo "No worktree changes produced."
             exit 0
           fi
