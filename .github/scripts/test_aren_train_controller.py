@@ -123,7 +123,31 @@ class ControllerTests(unittest.TestCase):
             self.api.writes,
         )
 
-    def test_acceptance_state_dispatches_verifier(self):
+    def test_acceptance_state_first_dispatches_read_only_worker_probe(self):
+        snapshot = Snapshot(
+            control_count=1, authorized=True, has_pr=True, merged=True,
+            head_sha="a" * 40, main_sha="c" * 40,
+            resulting_main_sha="c" * 40, resulting_main_ci="success",
+            acceptance_required=True, acceptance_verified=False,
+        )
+        result = self.run_execute(snapshot, pr=None)
+        self.assertEqual(result["action"], "acceptance_probe")
+        self.assertEqual(result["outcome"], "worker_dispatched")
+        dispatch = [
+            write for write in self.api.writes
+            if write[1] == "actions/workflows/aren-train-worker.yml/dispatches"
+        ][0]
+        self.assertEqual(dispatch[2]["inputs"]["action"], "acceptance_probe")
+        self.assertEqual(dispatch[2]["inputs"]["head"], "c" * 40)
+        self.assertEqual(dispatch[2]["inputs"]["branch"], "main")
+
+    def test_acceptance_state_dispatches_verifier_after_worker_evidence(self):
+        self.api.comments = [{
+            "body": (
+                "<!-- aren:worker:success issue=94 "
+                f"head={'c' * 40} action=acceptance_probe run=123 -->"
+            )
+        }]
         snapshot = Snapshot(
             control_count=1, authorized=True, has_pr=True, merged=True,
             head_sha="a" * 40, main_sha="c" * 40,
