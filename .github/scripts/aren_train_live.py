@@ -23,6 +23,51 @@ NEXT_ACTION = re.compile(
     r"(?ms)^### EXACT NEXT ACTION[ \t]*\n(.*?)(?=^###? |\Z)"
 )
 
+OWNER_GATE = re.compile(r"<!--\s*aren:owner-gate:([^>]+?)\s*-->")
+EXTERNAL_CI = re.compile(r"<!--\s*aren:external-ci:(required|not-required)\s*-->")
+ACCEPTANCE = re.compile(r"<!--\s*aren:acceptance:(required|not-required)\s*-->")
+RELEASE = re.compile(r"<!--\s*aren:release:(required|not-required)(?:\s+tag=([^\s>]+))?\s*-->")
+CANONICAL_PR = "<!-- aren:canonical-pr issue={issue} -->"
+
+
+def paginated_list(api: GitHub, path: str, *, max_pages: int = 20) -> list[dict]:
+    items: list[dict] = []
+    separator = "&" if "?" in path else "?"
+    for page in range(1, max_pages + 1):
+        batch = api.request("GET", f"{path}{separator}per_page=100&page={page}")
+        if not isinstance(batch, list):
+            raise GateError(f"Expected paginated list from {path}")
+        items.extend(batch)
+        if len(batch) < 100:
+            return items
+    raise GateError(f"Pagination limit exceeded for {path}")
+
+
+def train_contract(body: str) -> dict:
+    owner = OWNER_GATE.findall(body)
+    external = EXTERNAL_CI.findall(body)
+    acceptance = ACCEPTANCE.findall(body)
+    release = RELEASE.findall(body)
+    if len(owner) != 1:
+        raise GateError("Train contract must declare exactly one aren:owner-gate marker")
+    if len(external) != 1:
+        raise GateError("Train contract must declare exactly one aren:external-ci marker")
+    if len(acceptance) != 1:
+        raise GateError("Train contract must declare exactly one aren:acceptance marker")
+    if len(release) != 1:
+        raise GateError("Train contract must declare exactly one aren:release marker")
+    owner_value = owner[0].strip()
+    release_mode, release_tag = release[0]
+    if release_mode == "required" and not release_tag:
+        raise GateError("Release-required train must declare an exact release tag")
+    return {
+        "owner_gate": None if owner_value == "none" else owner_value,
+        "external_ci_required": external[0] == "required",
+        "acceptance_required": acceptance[0] == "required",
+        "release_required": release_mode == "required",
+        "release_tag": release_tag or None,
+    }
+
 
 def authorized_issue(body: str) -> int:
     checkpoint = CHECKPOINT.search(body)
@@ -68,9 +113,7 @@ def authorized_issue(body: str) -> int:
 
 
 def open_active_control(api: GitHub) -> dict:
-    issues = api.request("GET", "issues?state=open&labels=control%3Aactive&per_page=100")
-    if not isinstance(issues, list) or len(issues) >= 100:
-        raise GateError("CONTROL discovery incomplete")
+    issues = paginated_list(api, "issues?state=open&labels=control%3Aactive")
     controls = [issue for issue in issues if "pull_request" not in issue]
     if len(controls) != 1:
         raise GateError("CONTROL_PLANE_BLOCKED: exactly one OPEN control:active issue required")
@@ -81,13 +124,20 @@ def open_active_control(api: GitHub) -> dict:
 
 
 def linked_pr(api: GitHub, issue_number: int) -> dict | None:
-    prs = api.request("GET", "pulls?state=all&sort=updated&direction=desc&per_page=100")
-    if not isinstance(prs, list) or len(prs) >= 100:
-        raise GateError("PR discovery incomplete; pagination required")
-    pattern = re.compile(rf"\b(?:refs|closes|fixes)[ \t]+#{issue_number}\b", re.I)
+    prs = paginated_list(api, "pulls?state=all&sort=updated&direction=desc")
+    explicit_marker = CANONICAL_PR.format(issue=issue_number)
+    explicit = [pr for pr in prs if explicit_marker in (pr.get("body") or "")]
+    if len(explicit) > 1:
+        raise GateError("Multiple canonical PR markers for authorized issue")
+    if explicit:
+        return explicit[0]
+
+    pattern = re.compile(
+        rf"(?im)^(?:refs|closes|fixes)[ \t]+#{issue_number}(?:\b|[.,;:])"
+    )
     candidates = [pr for pr in prs if pattern.search(pr.get("body") or "")]
     if len(candidates) > 1:
-        raise GateError("Multiple PRs linked to authorized issue; reconciliation required")
+        raise GateError("Multiple PRs linked to authorized issue; add one canonical PR marker")
     return candidates[0] if candidates else None
 
 
@@ -118,8 +168,9 @@ def check_result(api: GitHub, sha: str, branch: str) -> str | None:
 
 
 def reviews_result(api: GitHub, number: int) -> bool | None:
-    reviews = api.request("GET", f"pulls/{number}/reviews?per_page=100")
-    if not isinstance(reviews, list) or len(reviews) >= 100:
+    try:
+        reviews = paginated_list(api, f"pulls/{number}/reviews")
+    except GateError:
         return None
     latest = {}
     for review in reviews:
@@ -156,11 +207,12 @@ def review_threads_result(api: GitHub, number: int) -> bool | None:
     return all(node.get("isResolved") is True for node in nodes)
 
 
-def external_ci_result(api: GitHub, issue_number: int, issue_body: str, head: str) -> str:
-    if "<!-- aren:external-ci:required -->" not in issue_body:
+def external_ci_result(api: GitHub, issue_number: int, required: bool, head: str) -> str:
+    if not required:
         return "not_required"
-    comments = api.request("GET", f"issues/{issue_number}/comments?per_page=100")
-    if not isinstance(comments, list) or len(comments) >= 100:
+    try:
+        comments = paginated_list(api, f"issues/{issue_number}/comments")
+    except GateError:
         return "pending"
     ok = f"<!-- aren:external-ci:success head={head} -->"
     failed = f"<!-- aren:external-ci:failure head={head} -->"
@@ -170,6 +222,40 @@ def external_ci_result(api: GitHub, issue_number: int, issue_body: str, head: st
     if any(ok in body for body in bodies):
         return "success"
     return "pending"
+
+
+def acceptance_result(api: GitHub, issue_number: int, required: bool, main_sha: str) -> bool:
+    if not required:
+        return False
+    try:
+        comments = paginated_list(api, f"issues/{issue_number}/comments")
+    except GateError:
+        return False
+    ok = f"<!-- aren:acceptance:success main={main_sha} -->"
+    return any(ok in (comment.get("body") or "") for comment in comments)
+
+
+def release_result(api: GitHub, required: bool, tag: str | None, main_sha: str) -> tuple[bool, bool, bool]:
+    if not required:
+        return False, False, False
+    if not tag:
+        return False, False, False
+    ref = api.request("GET", f"git/ref/tags/{tag}")
+    target = (ref or {}).get("object", {})
+    qualified = target.get("type") == "commit" and target.get("sha") == main_sha
+    runs = api.request(
+        "GET",
+        "actions/workflows/aren-release.yml/runs?"
+        + urllib.parse.urlencode({"head_sha": main_sha, "per_page": 100}),
+    )
+    matches = [
+        run for run in (runs or {}).get("workflow_runs", [])
+        if run.get("head_sha") == main_sha and run.get("head_branch") == tag
+    ]
+    if not matches:
+        return qualified, False, False
+    newest = max(matches, key=lambda run: (run.get("run_number", 0), run.get("run_attempt", 0)))
+    return qualified, True, newest.get("status") == "completed" and newest.get("conclusion") == "success"
 
 
 def main_ci_result(api: GitHub, sha: str) -> str | None:
@@ -202,12 +288,20 @@ def build_snapshot(api: GitHub) -> tuple[int, Snapshot]:
     issue = api.request("GET", f"issues/{number}")
     if not issue or issue.get("state") != "open":
         raise GateError("Authorized issue missing or no longer open; refresh CONTROL")
+    contract = train_contract(issue.get("body") or "")
     main = api.request("GET", "branches/main")
     main_sha = (main or {}).get("commit", {}).get("sha")
     if not main_sha:
         raise GateError("Cannot determine exact main SHA")
     pr = linked_pr(api, number)
-    snapshot = Snapshot(control_count=1, authorized=True, main_sha=main_sha)
+    snapshot = Snapshot(
+        control_count=1,
+        authorized=True,
+        main_sha=main_sha,
+        owner_gate=contract["owner_gate"],
+        release_required=contract["release_required"],
+        acceptance_required=contract["acceptance_required"],
+    )
     if pr is None:
         return number, snapshot
 
@@ -220,6 +314,9 @@ def build_snapshot(api: GitHub) -> tuple[int, Snapshot]:
         raise GateError("Linked PR has no exact head")
     if detail.get("merged"):
         resulting = detail.get("merge_commit_sha")
+        release_qualified, release_started, release_success = release_result(
+            api, contract["release_required"], contract["release_tag"], main_sha
+        )
         return number, dataclasses.replace(
             snapshot,
             has_pr=True,
@@ -227,6 +324,12 @@ def build_snapshot(api: GitHub) -> tuple[int, Snapshot]:
             head_sha=head,
             resulting_main_sha=resulting,
             resulting_main_ci=main_ci_result(api, resulting) if resulting == main_sha else None,
+            release_tag_qualified=release_qualified,
+            release_started=release_started,
+            release_success=release_success,
+            acceptance_verified=acceptance_result(
+                api, number, contract["acceptance_required"], main_sha
+            ),
         )
 
     comparison = api.request("GET", f"compare/{urllib.parse.quote(main_sha)}...{urllib.parse.quote(head)}")
@@ -237,7 +340,7 @@ def build_snapshot(api: GitHub) -> tuple[int, Snapshot]:
     pr_body = detail.get("body") or ""
     scope_accepted = "<!-- aren:scope-accepted -->" in pr_body
     preservation_verified = "<!-- aren:preservation-verified -->" in pr_body
-    external_ci = external_ci_result(api, number, issue.get("body") or "", head)
+    external_ci = external_ci_result(api, number, contract["external_ci_required"], head)
     return number, dataclasses.replace(
         snapshot,
         has_pr=True,
